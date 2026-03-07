@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>游戏中心图标生成器</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+        }
+        canvas {
+            border-radius: 22px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            margin: 20px 0;
+        }
+        .buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            background: #007AFF;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056CC;
+        }
+        .instructions {
+            max-width: 600px;
+            margin-top: 20px;
+            padding: 20px;
+            background: white;
+            border-radius: 12px;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎮 游戏中心图标生成器</h1>
+
+    <canvas id="icon" width="1024" height="1024"></canvas>
+
+    <div class="buttons">
+        <button onclick="downloadIcon(1024)">下载 1024×1024</button>
+        <button onclick="downloadAllSizes()">下载所有尺寸</button>
+    </div>
+
+    <div class="instructions">
+        <h3>使用说明：</h3>
+        <ol>
+            <li>点击"下载 1024×1024"获取高清图标</li>
+            <li>或使用<a href="https://appicon.co" target="_blank">appicon.co</a>自动生成所有尺寸</li>
+            <li>将生成的图标放入 Xcode 项目的 <code>Assets.xcassets/AppIcon.appiconset</code></li>
+        </ol>
+
+        <h3>图标预览：</h3>
+        <div id="previews"></div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('icon');
+        const ctx = canvas.getContext('2d');
+
+        function drawIcon() {
+            // 背景渐变
+            const gradient = ctx.createLinearGradient(0, 0, 1024, 1024);
+            gradient.addColorStop(0, '#667eea');
+            gradient.addColorStop(1, '#764ba2');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 1024, 1024);
+
+            // 圆角矩形背景
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+            roundRect(ctx, 100, 150, 824, 724, 80, true);
+
+            // 游戏卡片 1 - 2048 (橙色)
+            ctx.save();
+            ctx.translate(512, 380);
+            ctx.rotate(-0.1);
+            drawCard(ctx, 0, 0, 280, 200, '#edc22e', '2048');
+            ctx.restore();
+
+            // 游戏卡片 2 - 数独 (蓝色)
+            ctx.save();
+            ctx.translate(512, 450);
+            drawCard(ctx, 0, 0, 280, 200, '#1976d2', '数独');
+            ctx.restore();
+
+            // 游戏卡片 3 - 24点 (绿色)
+            ctx.save();
+            ctx.translate(512, 520);
+            ctx.rotate(0.1);
+            drawCard(ctx, 0, 0, 280, 200, '#4caf50', '24点');
+            ctx.restore();
+
+            // 底部文字
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 80px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('游戏中心', 512, 850);
+        }
+
+        function drawCard(ctx, x, y, w, h, color, text) {
+            // 卡片阴影
+            ctx.shadowColor = 'rgba(0,0,0,0.3)';
+            ctx.shadowBlur = 20;
+            ctx.shadowOffsetY = 10;
+
+            // 卡片背景
+            ctx.fillStyle = color;
+            roundRect(ctx, x - w/2, y - h/2, w, h, 20, true);
+
+            // 重置阴影
+            ctx.shadowColor = 'transparent';
+
+            // 卡片文字
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 60px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, x, y);
+        }
+
+        function roundRect(ctx, x, y, w, h, r, fill) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+            ctx.lineTo(x + w, y + h - r);
+            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+            ctx.lineTo(x + r, y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+            ctx.lineTo(x, y + r);
+            ctx.quadraticCurveTo(x, y, x + r, y);
+            ctx.closePath();
+            if (fill) ctx.fill();
+        }
+
+        function downloadIcon(size) {
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = size;
+            tempCanvas.height = size;
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(canvas, 0, 0, size, size);
+
+            const link = document.createElement('a');
+            link.download = `AppIcon-${size}x${size}.png`;
+            link.href = tempCanvas.toDataURL();
+            link.click();
+        }
+
+        function downloadAllSizes() {
+            const sizes = [20, 29, 40, 58, 60, 76, 80, 87, 120, 152, 167, 180, 1024];
+            sizes.forEach((size, i) => {
+                setTimeout(() => downloadIcon(size), i * 100);
+            });
+        }
+
+        // 生成预览
+        function generatePreviews() {
+            const sizes = [60, 76, 152, 1024];
+            const container = document.getElementById('previews');
+            sizes.forEach(size => {
+                const c = document.createElement('canvas');
+                c.width = size;
+                c.height = size;
+                c.style.width = size > 200 ? '200px' : size + 'px';
+                c.style.margin = '10px';
+                c.style.borderRadius = size >= 1024 ? '22px' : (size >= 60 ? '12px' : '8px');
+                c.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+                c.getContext('2d').drawImage(canvas, 0, 0, size, size);
+                container.appendChild(c);
+            });
+        }
+
+        drawIcon();
+        generatePreviews();
+    </script>
+</body>
+</html>

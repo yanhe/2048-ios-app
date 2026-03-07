@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>游戏中心 - 2048 & 数独</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Clear+Sans:wght@400;700&display=swap');
+        body {
+            font-family: 'Clear Sans', sans-serif;
+            background-color: #f5f5f5;
+            overscroll-behavior: none;
+            touch-action: none;
+        }
+        .tile-new { animation: appear 0.2s ease-in-out; }
+        @keyframes appear { 0% { opacity: 0; transform: scale(0); } 100% { opacity: 1; transform: scale(1); } }
+        .direction-btn {
+            background: linear-gradient(145deg, #9e8570, #8f7a66);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.2);
+            transition: all 0.1s ease;
+        }
+        .direction-btn:active { transform: scale(0.95); box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 2px 4px rgba(0,0,0,0.2); }
+        .game-board-2048 { touch-action: none; user-select: none; -webkit-user-select: none; }
+        .sudoku-cell { transition: all 0.15s ease; cursor: pointer; }
+        .sudoku-cell:hover:not(.fixed) { background: #f5f5f5; }
+        .sudoku-cell.selected { background: #1976d2 !important; color: white !important; }
+        .sudoku-cell.highlight { background: #e3f2fd; }
+        .sudoku-cell.same-number { background: #bbdefb; }
+        .note-grid { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); width: 100%; height: 100%; font-size: 10px; color: #757575; }
+        .game-card { transition: all 0.2s ease; }
+        .game-card:hover { transform: translateY(-4px); box-shadow: 0 12px 30px rgba(0,0,0,0.15); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useRef, useMemo } = React;
+
+        const storage = {
+            get: (key, defaultValue) => { try { const item = localStorage.getItem(key); return item ? JSON.parse(item) : defaultValue; } catch { return defaultValue; } },
+            set: (key, value) => localStorage.setItem(key, JSON.stringify(value))
+        };
+
+        const formatTime = (seconds) => { const mins = Math.floor(seconds / 60); const secs = seconds % 60; return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`; };
+
+        // ==================== 游戏选择 ====================
+        const GameSelector = ({ onSelectGame, stats }) => (
+            <div className="min-h-screen flex flex-col items-center justify-center p-8">
+                <h1 className="text-6xl font-bold text-gray-800 mb-4">游戏中心</h1>
+                <p className="text-gray-500 mb-12 text-xl">选择一个游戏开始游玩</p>
+                <div className="flex gap-10">
+                    <div onClick={() => onSelectGame('2048')} className="game-card bg-white rounded-3xl p-10 cursor-pointer w-80 shadow-lg border border-gray-200">
+                        <div className="text-7xl font-bold text-orange-600 mb-4">2048</div>
+                        <div className="text-gray-600 mb-8 text-lg">经典数字合并游戏</div>
+                        <div className="space-y-3 text-base text-gray-700">
+                            <div className="flex justify-between"><span>最高分:</span><span className="font-bold">{stats['2048']?.bestScore || 0}</span></div>
+                            <div className="flex justify-between"><span>游戏次数:</span><span className="font-bold">{stats['2048']?.gamesPlayed || 0}</span></div>
+                        </div>
+                    </div>
+                    <div onClick={() => onSelectGame('sudoku')} className="game-card bg-white rounded-3xl p-10 cursor-pointer w-80 shadow-lg border border-gray-200">
+                        <div className="text-7xl font-bold text-blue-600 mb-4">数独</div>
+                        <div className="text-gray-600 mb-8 text-lg">经典数字逻辑游戏</div>
+                        <div className="space-y-3 text-base text-gray-700">
+                            <div className="flex justify-between"><span>完成次数:</span><span className="font-bold">{stats.sudoku?.completed || 0}</span></div>
+                            <div className="flex justify-between"><span>最快时间:</span><span className="font-bold">{stats.sudoku?.bestTime ? formatTime(stats.sudoku.bestTime) : '--:--'}</span></div>
+                        </div>
+                    </div>
+                    <div onClick={() => onSelectGame('24point')} className="game-card bg-white rounded-3xl p-10 cursor-pointer w-80 shadow-lg border border-gray-200">
+                        <div className="text-7xl font-bold text-green-600 mb-4">24点</div>
+                        <div className="text-gray-600 mb-8 text-lg">加减法挑战</div>
+                        <div className="space-y-3 text-base text-gray-700">
+                            <div className="flex justify-between"><span>完成题数:</span><span className="font-bold">{stats['24point']?.completed || 0}</span></div>
+                            <div className="flex justify-between"><span>总尝试:</span><span className="font-bold">{stats['24point']?.totalAttempts || 0}</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+
+        // ==================== 2048 游戏（保持原样）====================
+        const GRID_SIZE_2048 = 4;
+        const TILE_SIZE = 100;
+        const GAP = 12;
+
+        const getTileColor = (value) => {
+            const colors = { 2: { bg: '#eee4da', text: '#776e65' }, 4: { bg: '#ede0c8', text: '#776e65' }, 8: { bg: '#f2b179', text: '#f9f6f2' }, 16: { bg: '#f59563', text: '#f9f6f2' }, 32: { bg: '#f67c5f', text: '#f9f6f2' }, 64: { bg: '#f65e3b', text: '#f9f6f2' }, 128: { bg: '#edcf72', text: '#f9f6f2' }, 256: { bg: '#edcc61', text: '#f9f6f2' }, 512: { bg: '#edc850', text: '#f9f6f2' }, 1024: { bg: '#edc53f', text: '#f9f6f2' }, 2048: { bg: '#edc22e', text: '#f9f6f2' } };
+            return colors[value] || { bg: '#3c3a32', text: '#f9f6f2' };
+        };
+        const createEmptyBoard2048 = () => Array(GRID_SIZE_2048).fill(null).map(() => Array(GRID_SIZE_2048).fill(0));
+        const addRandomTile2048 = (board) => {
+            const emptyCells = [];
+            for (let r = 0; r < GRID_SIZE_2048; r++) for (let c = 0; c < GRID_SIZE_2048; c++) if (board[r][c] === 0) emptyCells.push({ r, c });
+            if (emptyCells.length === 0) return board;
+            const { r, c } = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+            board[r][c] = Math.random() < 0.9 ? 2 : 4;
+            return board;
+        };
+        const initGame2048 = () => { let board = createEmptyBoard2048(); board = addRandomTile2048(board); board = addRandomTile2048(board); return board; };
+        const rotateLeft2048 = (board) => { const N = board.length; const result = createEmptyBoard2048(); for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) result[N - 1 - c][r] = board[r][c]; return result; };
+        const slideRowLeft2048 = (row) => { let filtered = row.filter(val => val !== 0); for (let i = 0; i < filtered.length - 1; i++) if (filtered[i] === filtered[i + 1]) { filtered[i] *= 2; filtered[i + 1] = 0; } filtered = filtered.filter(val => val !== 0); while (filtered.length < GRID_SIZE_2048) filtered.push(0); return filtered; };
+        const boardsEqual2048 = (a, b) => { for (let r = 0; r < GRID_SIZE_2048; r++) for (let c = 0; c < GRID_SIZE_2048; c++) if (a[r][c] !== b[r][c]) return false; return true; };
+        const moveBoard2048 = (board, direction) => {
+            let newBoard = board.map(row => [...row]);
+            let rotations = { left: 0, up: 1, right: 2, down: 3 };
+            let rot = rotations[direction];
+            for (let i = 0; i < rot; i++) newBoard = rotateLeft2048(newBoard);
+            let scoreGained = 0;
+            for (let r = 0; r < GRID_SIZE_2048; r++) { const oldRow = [...newBoard[r]]; newBoard[r] = slideRowLeft2048(newBoard[r]); for (let c = 0; c < GRID_SIZE_2048; c++) if (oldRow[c] !== 0 && oldRow[c] !== newBoard[r][c] && newBoard[r][c] > oldRow[c]) scoreGained += newBoard[r][c]; }
+            for (let i = 0; i < (4 - rot) % 4; i++) newBoard = rotateLeft2048(newBoard);
+            return { board: newBoard, scoreGained, moved: !boardsEqual2048(board, newBoard) };
+        };
+        const hasValidMoves2048 = (board) => { for (let r = 0; r < GRID_SIZE_2048; r++) for (let c = 0; c < GRID_SIZE_2048; c++) { if (board[r][c] === 0) return true; if (c < GRID_SIZE_2048 - 1 && board[r][c] === board[r][c + 1]) return true; if (r < GRID_SIZE_2048 - 1 && board[r][c] === board[r + 1][c]) return true; } return false; };
+        const hasWon2048 = (board) => { for (let r = 0; r < GRID_SIZE_2048; r++) for (let c = 0; c < GRID_SIZE_2048; c++) if (board[r][c] === 2048) return true; return false; };
+
+        const Tile2048 = ({ value }) => { const { bg, text } = getTileColor(value); return (<div className="w-full h-full rounded-xl flex items-center justify-center font-bold text-6xl tile-new" style={{ backgroundColor: bg, color: text }}>{value !== 0 ? value : ''}</div>); };
+
+        const Game2048 = ({ onBack, onUpdateStats }) => {
+            const [board, setBoard] = useState(() => initGame2048());
+            const [score, setScore] = useState(0);
+            const [bestScore, setBestScore] = useState(() => storage.get('2048-pad-best-score', 0));
+            const [gameOver, setGameOver] = useState(false);
+            const [won, setWon] = useState(false);
+            const [keepPlaying, setKeepPlaying] = useState(false);
+            const boardRef = useRef(null);
+            const touchStartRef = useRef(null);
+
+            useEffect(() => { if (score > bestScore) { setBestScore(score); storage.set('2048-pad-best-score', score); onUpdateStats('2048', { bestScore: score }); } }, [score, bestScore]);
+
+            const handleMove = useCallback((direction) => {
+                if (gameOver && !keepPlaying) return;
+                const result = moveBoard2048(board, direction);
+                if (!result.moved) return;
+                const newBoard = addRandomTile2048(result.board);
+                setBoard(newBoard);
+                setScore(prev => prev + result.scoreGained);
+                if (!keepPlaying && hasWon2048(newBoard)) { setWon(true); onUpdateStats('2048', { wins: true }); }
+                if (!hasValidMoves2048(newBoard)) { setGameOver(true); onUpdateStats('2048', { gamesPlayed: true }); }
+            }, [board, gameOver, keepPlaying]);
+
+            const handleNewGame = () => { setBoard(initGame2048()); setScore(0); setGameOver(false); setWon(false); setKeepPlaying(false); onUpdateStats('2048', { gamesPlayed: true }); };
+            const handleTouchStart = (e) => { const touch = e.touches[0]; touchStartRef.current = { x: touch.clientX, y: touch.clientY }; };
+            const handleTouchEnd = (e) => {
+                if (!touchStartRef.current) return;
+                const touch = e.changedTouches[0];
+                const diffX = touch.clientX - touchStartRef.current.x;
+                const diffY = touch.clientY - touchStartRef.current.y;
+                const minSwipeDistance = 30;
+                if (Math.abs(diffX) > Math.abs(diffY)) { if (Math.abs(diffX) > minSwipeDistance) handleMove(diffX > 0 ? 'right' : 'left'); }
+                else { if (Math.abs(diffY) > minSwipeDistance) handleMove(diffY > 0 ? 'down' : 'up'); }
+                touchStartRef.current = null;
+            };
+
+            useEffect(() => {
+                const preventScroll = (e) => e.preventDefault();
+                const boardElement = boardRef.current;
+                if (boardElement) boardElement.addEventListener('touchmove', preventScroll, { passive: false });
+                return () => { if (boardElement) boardElement.removeEventListener('touchmove', preventScroll); };
+            }, []);
+
+            const boardSize = GRID_SIZE_2048 * TILE_SIZE + (GRID_SIZE_2048 + 1) * GAP;
+
+            return (
+                <div className="min-h-screen flex flex-col items-center justify-center p-6">
+                    <div className="flex flex-col items-center gap-6">
+                        <div className="flex items-center justify-between w-full px-2">
+                            <button onClick={onBack} className="text-gray-500 hover:text-gray-700 text-lg">← 返回</button>
+                            <h1 className="text-5xl font-bold text-[#776e65]">2048</h1>
+                            <div className="w-10"></div>
+                        </div>
+                        <div className="flex gap-4">
+                            <div className="bg-[#bbada0] rounded-xl p-3 text-center min-w-[90px]"><div className="text-xs text-[#eee4da] font-bold uppercase">得分</div><div className="text-2xl font-bold text-white">{score}</div></div>
+                            <div className="bg-[#bbada0] rounded-xl p-3 text-center min-w-[90px]"><div className="text-xs text-[#eee4da] font-bold uppercase">最高分</div><div className="text-2xl font-bold text-white">{bestScore}</div></div>
+                        </div>
+                        <div className="relative">
+                            <div ref={boardRef} className="game-board-2048 bg-[#bbada0] rounded-2xl p-3" style={{ width: boardSize, height: boardSize }} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+                                <div className="grid grid-cols-4 gap-3 h-full">
+                                    {board.map((row, r) => row.map((value, c) => (<div key={`${r}-${c}`} className="bg-[#cdc1b4] rounded-xl" style={{ width: TILE_SIZE, height: TILE_SIZE }}>{value !== 0 && <Tile2048 value={value} />}</div>)))}
+                                </div>
+                            </div>
+                            {(gameOver || won) && !keepPlaying && (
+                                <div className="absolute inset-0 bg-black/60 rounded-2xl flex flex-col items-center justify-center">
+                                    <div className="text-5xl font-bold text-white mb-6">{won ? '你赢了！' : '游戏结束'}</div>
+                                    <div className="flex gap-4">
+                                        {won && <button onClick={() => setKeepPlaying(true)} className="bg-[#8f7a66] text-white font-bold py-3 px-6 rounded-lg text-xl hover:bg-[#7f6a56]">继续游戏</button>}
+                                        <button onClick={handleNewGame} className="bg-[#8f7a66] text-white font-bold py-3 px-6 rounded-lg text-xl hover:bg-[#7f6a56]">再试一次</button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        <button onClick={handleNewGame} className="direction-btn w-full max-w-[200px] py-4 rounded-xl text-white font-bold text-xl">新游戏</button>
+                        <p className="text-[#776e65] text-center text-lg">滑动屏幕移动方块</p>
+                    </div>
+                </div>
+            );
+        };
+
+        // ==================== 24点游戏 ====================
+        const Game24Point = ({ onBack, onUpdateStats }) => {
+            const [numbers, setNumbers] = useState([]);
+            const [expression, setExpression] = useState('');
+            const [usedNumbers, setUsedNumbers] = useState([]);
+            const [message, setMessage] = useState('');
+            const [messageType, setMessageType] = useState('');
+            const [history, setHistory] = useState([]);
+            const [problemHistory, setProblemHistory] = useState([]);
+            const [currentIndex, setCurrentIndex] = useState(-1);
+            const [correctCount, setCorrectCount] = useState(0);
+            const [wrongCount, setWrongCount] = useState(0);
+
+            const checkSolvable = (nums) => {
+                const ops = ['+', '-'];
+                const permutations = (arr) => {
+                    if (arr.length <= 1) return [arr];
+                    const result = [];
+                    for (let i = 0; i < arr.length; i++) {
+                        const rest = [...arr.slice(0, i), ...arr.slice(i + 1)];
+                        for (const perm of permutations(rest)) {
+                            result.push([arr[i], ...perm]);
+                        }
+                    }
+                    return result;
+                };
+                const perms = permutations(nums);
+                for (const p of perms) {
+                    const [a, b, c, d] = p;
+                    for (const op1 of ops) {
+                        for (const op2 of ops) {
+                            for (const op3 of ops) {
+                                const exprs = [
+                                    `(( ${a} ${op1} ${b} ) ${op2} ${c}) ${op3} ${d}`,
+                                    `( ${a} ${op1} ( ${b} ${op2} ${c} )) ${op3} ${d}`,
+                                    `( ${a} ${op1} ${b} ) ${op2} ( ${c} ${op3} ${d} )`,
+                                    `${a} ${op1} (( ${b} ${op2} ${c} ) ${op3} ${d})`,
+                                    `${a} ${op1} ( ${b} ${op2} ( ${c} ${op3} ${d} ))`
+                                ];
+                                for (const expr of exprs) {
+                                    try {
+                                        const result = Function('"use strict"; return (' + expr + ')')();
+                                        if (Math.abs(result - 24) < 0.0001) return true;
+                                    } catch (e) {}
+                                }
+                            }
+                        }
+                    }
+                }
+                return false;
+            };
+
+            const generateNumbers = () => {
+                let nums;
+                let attempts = 0;
+                do {
+                    nums = Array(4).fill(0).map(() => Math.floor(Math.random() * 13) + 1);
+                    attempts++;
+                } while (!checkSolvable(nums) && attempts < 100);
+                const newProblem = { numbers: nums, solved: false };
+                const newProblemHistory = [...problemHistory, newProblem];
+                setProblemHistory(newProblemHistory);
+                setCurrentIndex(newProblemHistory.length - 1);
+                setNumbers(nums);
+                setExpression('');
+                setUsedNumbers([]);
+                setMessage('');
+                setMessageType('');
+            };
+
+            const goToProblem = (index) => {
+                if (index < 0 || index >= problemHistory.length) return;
+                setCurrentIndex(index);
+                setNumbers(problemHistory[index].numbers);
+                setExpression('');
+                setUsedNumbers([]);
+                setMessage('');
+                setMessageType('');
+            };
+
+            useEffect(() => { generateNumbers(); }, []);
+
+            const addToExpression = (value, type) => {
+                if (type === 'number') {
+                    const numIndex = numbers.findIndex((n, i) => n === value && !usedNumbers.includes(i));
+                    if (numIndex === -1) return;
+                    setUsedNumbers([...usedNumbers, numIndex]);
+                }
+                setExpression(expression + value);
+                setMessage('');
+            };
+
+            const addOperator = (op) => {
+                setExpression(expression + ' ' + op + ' ');
+                setMessage('');
+            };
+
+            const addParenthesis = (p) => {
+                setExpression(expression + p);
+                setMessage('');
+            };
+
+            const clearExpression = () => {
+                setExpression('');
+                setUsedNumbers([]);
+                setMessage('');
+                setMessageType('');
+            };
+
+            const backspace = () => {
+                const trimmed = expression.trimEnd();
+                const lastChar = trimmed[trimmed.length - 1];
+                const numMatch = numbers.find((n, i) => String(n) === lastChar && usedNumbers.includes(i));
+                if (numMatch !== undefined) {
+                    const numIndex = usedNumbers[usedNumbers.length - 1];
+                    setUsedNumbers(usedNumbers.filter(i => i !== numIndex));
+                }
+                setExpression(trimmed.slice(0, -1).trimEnd());
+                setMessage('');
+            };
+
+            const checkAnswer = () => {
+                onUpdateStats('24point', { attempt: true });
+                try {
+                    if (usedNumbers.length !== 4) {
+                        setMessage('请使用所有4个数字');
+                        setMessageType('error');
+                        return;
+                    }
+                    const result = Function('"use strict"; return (' + expression + ')')();
+                    if (Math.abs(result - 24) < 0.0001) {
+                        setMessage('正确！' + expression + ' = 24');
+                        setMessageType('success');
+                        onUpdateStats('24point', { completed: true });
+                        setHistory([{ numbers, expression, correct: true }, ...history].slice(0, 10));
+                        setCorrectCount(c => c + 1);
+                    } else {
+                        setMessage('结果是 ' + result + '，不是24');
+                        setMessageType('error');
+                        setWrongCount(w => w + 1);
+                    }
+                } catch (e) {
+                    setMessage('表达式格式错误');
+                    setMessageType('error');
+                    setWrongCount(w => w + 1);
+                }
+            };
+
+            const nextProblem = () => {
+                if (messageType === 'success') {
+                    setHistory([{ numbers, expression, correct: true }, ...history].slice(0, 10));
+                }
+                generateNumbers();
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col items-center justify-center p-6">
+                    <button onClick={onBack} className="absolute top-6 left-6 p-3 rounded-full hover:bg-gray-200">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                    </button>
+                    <h1 className="text-5xl font-bold text-green-600 mb-2">24点挑战</h1>
+                    <p className="text-gray-500 mb-2 text-xl">用加减法和括号，把4个数字算出24</p>
+                    {problemHistory.length > 0 && (
+                        <p className="text-lg text-gray-400 mb-2">题目 {currentIndex + 1} / {problemHistory.length}</p>
+                    )}
+                    <div className="flex gap-6 mb-6">
+                        <span className="text-green-600 font-medium text-xl">✓ 对 {correctCount}</span>
+                        <span className="text-red-500 font-medium text-xl">✗ 错 {wrongCount}</span>
+                    </div>
+
+                    <div className="bg-white rounded-3xl p-10 shadow-lg border border-gray-200 w-full max-w-2xl">
+                        <div className="flex justify-center gap-6 mb-10">
+                            {numbers.map((num, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => !usedNumbers.includes(i) && addToExpression(num, 'number')}
+                                    disabled={usedNumbers.includes(i)}
+                                    className={`w-24 h-24 rounded-2xl text-5xl font-bold transition ${usedNumbers.includes(i) ? 'bg-gray-200 text-gray-400' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}
+                                >
+                                    {num}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="bg-gray-50 rounded-2xl p-6 mb-6 min-h-[80px] flex items-center justify-center">
+                            <span className="text-3xl font-mono">{expression || '点击数字和运算符'}</span>
+                        </div>
+
+                        {message && (
+                            <div className={`rounded-2xl p-4 mb-6 text-center text-xl font-medium ${messageType === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                {message}
+                            </div>
+                        )}
+
+                        <div className="flex justify-center gap-4 mb-6">
+                            <button onClick={() => addOperator('+')} className="w-20 h-20 rounded-xl bg-blue-100 text-blue-700 text-4xl font-bold hover:bg-blue-200">+</button>
+                            <button onClick={() => addOperator('-')} className="w-20 h-20 rounded-xl bg-blue-100 text-blue-700 text-4xl font-bold hover:bg-blue-200">-</button>
+                            <button onClick={() => addParenthesis('(')} className="w-20 h-20 rounded-xl bg-purple-100 text-purple-700 text-3xl font-bold hover:bg-purple-200">(</button>
+                            <button onClick={() => addParenthesis(')')} className="w-20 h-20 rounded-xl bg-purple-100 text-purple-700 text-3xl font-bold hover:bg-purple-200">)</button>
+                        </div>
+
+                        <div className="flex justify-center gap-4 mb-8">
+                            <button onClick={clearExpression} className="px-6 py-3 rounded-xl bg-gray-200 text-gray-700 text-xl font-bold hover:bg-gray-300">清空</button>
+                            <button onClick={backspace} className="px-6 py-3 rounded-xl bg-gray-200 text-gray-700 text-xl font-bold hover:bg-gray-300">退格</button>
+                            <button onClick={checkAnswer} className="px-8 py-3 rounded-xl bg-green-600 text-white text-xl font-bold hover:bg-green-700">验证</button>
+                        </div>
+
+                        <div className="flex justify-center gap-4">
+                            <button onClick={() => goToProblem(currentIndex - 1)} disabled={currentIndex <= 0} className="px-8 py-3 rounded-xl bg-gray-500 text-white text-xl font-bold hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed">上一题</button>
+                            <button onClick={nextProblem} className="px-8 py-3 rounded-xl bg-blue-600 text-white text-xl font-bold hover:bg-blue-700">下一题</button>
+                        </div>
+                    </div>
+
+                    {history.length > 0 && (
+                        <div className="mt-8 w-full max-w-2xl">
+                            <h3 className="text-xl font-bold text-gray-700 mb-4">最近完成</h3>
+                            <div className="space-y-3">
+                                {history.map((h, i) => (
+                                    <div key={i} className="bg-white rounded-xl p-4 border border-gray-200 flex justify-between text-lg">
+                                        <span className="text-gray-600">{h.numbers.join(', ')}</span>
+                                        <span className="font-mono text-green-600">{h.expression} = 24</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // ==================== 数独游戏（新版）====================
+        const SUDOKU_SIZE = 9;
+        const BOX_SIZE = 3;
+
+        const isValidPlacement = (board, row, col, num) => {
+            for (let x = 0; x < SUDOKU_SIZE; x++) if (board[row][x] === num) return false;
+            for (let x = 0; x < SUDOKU_SIZE; x++) if (board[x][col] === num) return false;
+            const startRow = row - row % BOX_SIZE, startCol = col - col % BOX_SIZE;
+            for (let i = 0; i < BOX_SIZE; i++) for (let j = 0; j < BOX_SIZE; j++) if (board[i + startRow][j + startCol] === num) return false;
+            return true;
+        };
+
+        const solveBoard = (board) => {
+            for (let row = 0; row < SUDOKU_SIZE; row++) {
+                for (let col = 0; col < SUDOKU_SIZE; col++) {
+                    if (board[row][col] === 0) {
+                        for (let num = 1; num <= 9; num++) {
+                            if (isValidPlacement(board, row, col, num)) {
+                                board[row][col] = num;
+                                if (solveBoard(board)) return true;
+                                board[row][col] = 0;
+                            }
+                        }
+                        return false;
+                    }
+                }
+            }
+            return true;
+        };
+
+        const generateSudoku = (difficulty) => {
+            const board = Array(SUDOKU_SIZE).fill(null).map(() => Array(SUDOKU_SIZE).fill(0));
+            for (let i = 0; i < SUDOKU_SIZE; i += BOX_SIZE) {
+                const nums = [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => Math.random() - 0.5);
+                let idx = 0;
+                for (let row = i; row < i + BOX_SIZE; row++) for (let col = i; col < i + BOX_SIZE; col++) board[row][col] = nums[idx++];
+            }
+            solveBoard(board);
+            const solution = board.map(row => [...row]);
+            const cellsToKeep = { easy: 46, medium: 36, hard: 26 }[difficulty] || 36;
+            const positions = [];
+            for (let i = 0; i < SUDOKU_SIZE; i++) for (let j = 0; j < SUDOKU_SIZE; j++) positions.push([i, j]);
+            positions.sort(() => Math.random() - 0.5);
+            const puzzle = board.map(row => [...row]);
+            for (let i = 0; i < 81 - cellsToKeep; i++) { const [row, col] = positions[i]; puzzle[row][col] = 0; }
+            return { puzzle, solution };
+        };
+
+        const Sudoku = ({ onBack, onUpdateStats }) => {
+            const [difficulty, setDifficulty] = useState('medium');
+            const [puzzle, setPuzzle] = useState(null);
+            const [solution, setSolution] = useState(null);
+            const [userBoard, setUserBoard] = useState(null);
+            const [selectedCell, setSelectedCell] = useState(null);
+            const [notes, setNotes] = useState({});
+            const [noteMode, setNoteMode] = useState(false);
+            const [history, setHistory] = useState([]);
+            const [timer, setTimer] = useState(0);
+            const [isRunning, setIsRunning] = useState(false);
+            const [completed, setCompleted] = useState(false);
+            const [showSelect, setShowSelect] = useState(true);
+
+            const difficultyNames = { easy: '简单', medium: '中等', hard: '困难' };
+
+            const startGame = (diff) => {
+                setDifficulty(diff);
+                const { puzzle: newPuzzle, solution: newSolution } = generateSudoku(diff);
+                setPuzzle(newPuzzle);
+                setSolution(newSolution);
+                setUserBoard(newPuzzle.map(row => [...row]));
+                setNotes({});
+                setHistory([]);
+                setTimer(0);
+                setIsRunning(true);
+                setCompleted(false);
+                setShowSelect(false);
+                setSelectedCell(null);
+                setNoteMode(false);
+                onUpdateStats('sudoku', { gamesPlayed: true });
+            };
+
+            useEffect(() => { let interval; if (isRunning && !completed) interval = setInterval(() => setTimer(t => t + 1), 1000); return () => clearInterval(interval); }, [isRunning, completed]);
+            useEffect(() => { if (!userBoard || !solution) return; if (userBoard.every((row, r) => row.every((val, c) => val === solution[r][c]))) { setCompleted(true); setIsRunning(false); onUpdateStats('sudoku', { completed: true, time: timer }); } }, [userBoard, solution, timer]);
+
+            const remainingCounts = useMemo(() => {
+                if (!userBoard) return {};
+                const counts = {};
+                for (let num = 1; num <= 9; num++) { let filled = 0; for (let r = 0; r < SUDOKU_SIZE; r++) for (let c = 0; c < SUDOKU_SIZE; c++) if (userBoard[r][c] === num) filled++; counts[num] = 9 - filled; }
+                return counts;
+            }, [userBoard]);
+
+            const handleCellClick = (r, c) => { if (!completed && puzzle[r][c] === 0) setSelectedCell([r, c]); };
+
+            const handleNumber = (num) => {
+                if (!selectedCell || completed) return;
+                const [r, c] = selectedCell;
+                if (puzzle[r][c] !== 0) return;
+                setHistory(prev => [...prev, { board: userBoard.map(row => [...row]), notes: { ...notes } }]);
+                if (noteMode) {
+                    const key = `${r}-${c}`;
+                    const cellNotes = notes[key] || [];
+                    setNotes({ ...notes, [key]: cellNotes.includes(num) ? cellNotes.filter(n => n !== num) : [...cellNotes, num].sort() });
+                } else {
+                    const newBoard = userBoard.map(row => [...row]);
+                    newBoard[r][c] = num;
+                    setUserBoard(newBoard);
+                    const key = `${r}-${c}`;
+                    if (notes[key]) { const newNotes = { ...notes }; delete newNotes[key]; setNotes(newNotes); }
+                }
+            };
+
+            const handleErase = () => {
+                if (!selectedCell || completed) return;
+                const [r, c] = selectedCell;
+                if (puzzle[r][c] !== 0) return;
+                setHistory(prev => [...prev, { board: userBoard.map(row => [...row]), notes: { ...notes } }]);
+                const newBoard = userBoard.map(row => [...row]);
+                newBoard[r][c] = 0;
+                setUserBoard(newBoard);
+                const key = `${r}-${c}`;
+                if (notes[key]) { const newNotes = { ...notes }; delete newNotes[key]; setNotes(newNotes); }
+            };
+
+            const handleUndo = () => {
+                if (history.length === 0 || completed) return;
+                const last = history[history.length - 1];
+                setUserBoard(last.board);
+                setNotes(last.notes);
+                setHistory(prev => prev.slice(0, -1));
+            };
+
+            const handleHint = () => {
+                if (!selectedCell || completed) return;
+                const [r, c] = selectedCell;
+                if (puzzle[r][c] !== 0) return;
+                setHistory(prev => [...prev, { board: userBoard.map(row => [...row]), notes: { ...notes } }]);
+                const newBoard = userBoard.map(row => [...row]);
+                newBoard[r][c] = solution[r][c];
+                setUserBoard(newBoard);
+            };
+
+            const getCellClass = (r, c) => {
+                let cls = 'sudoku-cell';
+                if (!selectedCell) return cls;
+                const [sr, sc] = selectedCell;
+                if (r === sr && c === sc) cls += ' selected';
+                else if (r === sr || c === sc) cls += ' highlight';
+                else { const sBoxR = Math.floor(sr / 3), sBoxC = Math.floor(sc / 3), boxR = Math.floor(r / 3), boxC = Math.floor(c / 3); if (sBoxR === boxR && sBoxC === boxC) cls += ' highlight'; }
+                if (userBoard[sr][sc] !== 0 && userBoard[r][c] === userBoard[sr][sc]) cls += ' same-number';
+                return cls;
+            };
+
+            if (showSelect) {
+                return (
+                    <div className="min-h-screen flex flex-col items-center justify-center p-8">
+                        <button onClick={onBack} className="absolute top-6 left-6 p-3 rounded-full hover:bg-gray-200"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg></button>
+                        <h1 className="text-6xl font-bold text-gray-800 mb-8">数独</h1>
+                        <p className="text-gray-500 mb-10 text-xl">选择难度开始游戏</p>
+                        <div className="flex gap-6">
+                            <button onClick={() => startGame('easy')} className="bg-green-500 text-white font-bold py-5 px-10 rounded-2xl text-2xl hover:bg-green-600 transition shadow-lg">简单</button>
+                            <button onClick={() => startGame('medium')} className="bg-yellow-500 text-white font-bold py-5 px-10 rounded-2xl text-2xl hover:bg-yellow-600 transition shadow-lg">中等</button>
+                            <button onClick={() => startGame('hard')} className="bg-red-500 text-white font-bold py-5 px-10 rounded-2xl text-2xl hover:bg-red-600 transition shadow-lg">困难</button>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen flex flex-col p-6">
+                    <div className="flex items-center justify-between mb-4">
+                        <button onClick={() => setShowSelect(true)} className="p-3 rounded-full hover:bg-gray-200"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg></button>
+                        <div className="flex gap-3">
+                            <button className="p-3 rounded-full hover:bg-gray-200"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg></button>
+                            <button className="p-3 rounded-full hover:bg-gray-200"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button>
+                            <button className="p-3 rounded-full hover:bg-gray-200"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+                        </div>
+                    </div>
+                    <div className="flex justify-between items-center mb-4 px-4">
+                        <div className="text-center"><div className="text-sm text-gray-500 uppercase tracking-wider">难度</div><div className="text-xl font-bold text-blue-600">{difficultyNames[difficulty]}</div></div>
+                        <div className="text-center"><div className="text-sm text-gray-500 uppercase tracking-wider">时间</div><div className="text-xl font-bold text-blue-600">{formatTime(timer)}</div></div>
+                    </div>
+                    <div className="flex-1 flex items-center justify-center mb-4">
+                        <div className="relative">
+                            <div className="bg-white border-2 border-gray-700 p-1 rounded-lg shadow-lg">
+                                <div className="grid grid-cols-9">
+                                    {userBoard && userBoard.map((row, r) => row.map((val, c) => {
+                                        const cellNotes = notes[`${r}-${c}`] || [];
+                                        const isFixed = puzzle[r][c] !== 0;
+                                        return (
+                                            <div key={`${r}-${c}`} onClick={() => handleCellClick(r, c)} className={getCellClass(r, c)}
+                                                style={{ width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', fontWeight: isFixed ? '600' : '500', color: isFixed ? '#263238' : '#1976d2', borderRight: (c + 1) % 3 === 0 && c !== 8 ? '2px solid #37474f' : '1px solid #e0e0e0', borderBottom: (r + 1) % 3 === 0 && r !== 8 ? '2px solid #37474f' : '1px solid #e0e0e0' }}>
+                                                {val !== 0 ? val : cellNotes.length > 0 ? <div className="note-grid">{[1,2,3,4,5,6,7,8,9].map(n => <span key={n}>{cellNotes.includes(n) ? n : ''}</span>)}</div> : null}
+                                            </div>
+                                        );
+                                    }))}
+                                </div>
+                            </div>
+                            {completed && (
+                                <div className="absolute inset-0 bg-black/60 rounded-lg flex flex-col items-center justify-center">
+                                    <div className="text-5xl font-bold text-white mb-4">恭喜完成！</div>
+                                    <div className="text-2xl text-white mb-6">用时: {formatTime(timer)}</div>
+                                    <button onClick={() => setShowSelect(true)} className="bg-blue-600 text-white font-bold py-4 px-10 rounded-xl text-xl hover:bg-blue-700">再玩一局</button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    <div className="flex justify-center gap-8 mb-4">
+                        <button onClick={handleUndo} className="flex flex-col items-center p-3 rounded-xl hover:bg-gray-200"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#546e7a" strokeWidth="1.5"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg><span className="text-sm text-gray-600 mt-1">撤销</span></button>
+                        <button onClick={handleErase} className="flex flex-col items-center p-3 rounded-xl hover:bg-gray-200"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#546e7a" strokeWidth="1.5"><path d="M20 20H7L3 16C2 15 2 13 3 12L13 2L22 11L20 20Z"/><path d="M17 17L7 7"/></svg><span className="text-sm text-gray-600 mt-1">擦除</span></button>
+                        <button onClick={() => setNoteMode(!noteMode)} className={`flex flex-col items-center p-3 rounded-xl ${noteMode ? 'bg-blue-100' : 'hover:bg-gray-200'}`}><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={noteMode ? "#1976d2" : "#546e7a"} strokeWidth="1.5"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg><span className={`text-sm mt-1 ${noteMode ? 'text-blue-600' : 'text-gray-600'}`}>笔记</span></button>
+                        <button onClick={handleHint} className="flex flex-col items-center p-3 rounded-xl hover:bg-gray-200 relative"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#546e7a" strokeWidth="1.5"><path d="M9.663 17h4.673M12 3v1M6.343 4.343l-.707-.707M18.364 4.343l.707-.707M4 12h1M20 12h1M12 21v-7a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v7h7z"/><circle cx="12" cy="9" r="2"/></svg><span className="text-sm text-gray-600 mt-1">提示</span><div className="absolute top-2 right-2 w-5 h-5 bg-blue-600 text-white text-xs rounded-full flex items-center justify-center">1</div></button>
+                    </div>
+                    <div className="flex justify-center gap-3">
+                        {[1,2,3,4,5,6,7,8,9].map(num => {
+                            const count = remainingCounts[num] || 0;
+                            return (
+                                <button key={num} onClick={() => count > 0 && handleNumber(num)} disabled={count === 0} className="bg-white border border-gray-300 rounded-2xl shadow-md flex flex-col items-center justify-center" style={{ width: '60px', height: '70px', opacity: count === 0 ? 0.4 : 1 }}>
+                                    <span className="text-3xl font-semibold text-blue-600">{num}</span>
+                                    <span className="text-sm text-gray-400">{count}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            );
+        };
+
+        // ==================== 主应用 ====================
+        const App = () => {
+            const [currentGame, setCurrentGame] = useState(null);
+            const [stats, setStats] = useState(() => ({
+                '2048': storage.get('2048-pad-stats', { bestScore: 0, gamesPlayed: 0, wins: 0 }),
+                'sudoku': storage.get('sudoku-pad-stats', { completed: 0, bestTime: null, gamesPlayed: 0 }),
+                '24point': storage.get('24point-pad-stats', { completed: 0, totalAttempts: 0 })
+            }));
+
+            const updateStats = useCallback((game, updates) => {
+                setStats(prev => {
+                    const newStats = { ...prev };
+                    if (game === '2048') {
+                        newStats['2048'] = { bestScore: Math.max(prev['2048'].bestScore, updates.bestScore || 0), gamesPlayed: prev['2048'].gamesPlayed + (updates.gamesPlayed ? 1 : 0), wins: prev['2048'].wins + (updates.wins ? 1 : 0) };
+                        storage.set('2048-pad-stats', newStats['2048']);
+                    } else if (game === 'sudoku') {
+                        const newCompleted = prev.sudoku.completed + (updates.completed ? 1 : 0);
+                        const newBestTime = updates.time && (!prev.sudoku.bestTime || updates.time < prev.sudoku.bestTime) ? updates.time : prev.sudoku.bestTime;
+                        newStats.sudoku = { completed: newCompleted, bestTime: newBestTime, gamesPlayed: prev.sudoku.gamesPlayed + (updates.gamesPlayed ? 1 : 0) };
+                        storage.set('sudoku-pad-stats', newStats.sudoku);
+                    } else if (game === '24point') {
+                        newStats['24point'] = {
+                            completed: prev['24point'].completed + (updates.completed ? 1 : 0),
+                            totalAttempts: prev['24point'].totalAttempts + (updates.attempt ? 1 : 0)
+                        };
+                        storage.set('24point-pad-stats', newStats['24point']);
+                    }
+                    return newStats;
+                });
+            }, []);
+
+            if (currentGame === '2048') return <Game2048 onBack={() => setCurrentGame(null)} onUpdateStats={updateStats} />;
+            if (currentGame === 'sudoku') return <Sudoku onBack={() => setCurrentGame(null)} onUpdateStats={updateStats} />;
+            if (currentGame === '24point') return <Game24Point onBack={() => setCurrentGame(null)} onUpdateStats={updateStats} />;
+            return <GameSelector onSelectGame={setCurrentGame} stats={stats} />;
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

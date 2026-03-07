@@ -1,0 +1,21 @@
+{
+  "appId": "com.yourcompany.gamecenter",
+  "appName": "游戏中心",
+  "webDir": "src",
+  "bundledWebRuntime": false,
+  "server": {
+    "allowNavigation": []
+  },
+  "ios": {
+    "contentInset": "always",
+    "preferredContentMode": "mobile",
+    "scheme": "gamecenter"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "launchAutoHide": true,
+      "backgroundColor": "#f5f5f5"
+    }
+  }
+}

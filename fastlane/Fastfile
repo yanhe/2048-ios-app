@@ -1,0 +1,72 @@
+default_platform(:ios)
+
+platform :ios do
+  desc "Build unsigned IPA"
+  lane :build_unsigned do
+    # 确保 Capacitor 已同步
+    sh("cd .. && npx cap sync")
+
+    # 构建归档
+    gym(
+      workspace: "ios/App/App.xcworkspace",
+      scheme: "App",
+      configuration: "Release",
+      export_method: "development",
+      skip_package_pkg: true,
+      skip_package_ipa: false,
+      build_path: "build",
+      archive_path: "build/App.xcarchive",
+      output_directory: "build",
+      output_name: "GameCenter-unsigned.ipa",
+      xcargs: {
+        "CODE_SIGNING_ALLOWED" => "NO",
+        "CODE_SIGNING_REQUIRED" => "NO",
+        "CODE_SIGN_IDENTITY" => ""
+      }
+    )
+  end
+
+  desc "Build ad-hoc IPA (需要证书)"
+  lane :build_adhoc do
+    sh("cd .. && npx cap sync")
+
+    gym(
+      workspace: "ios/App/App.xcworkspace",
+      scheme: "App",
+      configuration: "Release",
+      export_method: "ad-hoc",
+      build_path: "build",
+      output_directory: "build",
+      output_name: "GameCenter-adhoc.ipa"
+    )
+  end
+
+  desc "Build app-store IPA (需要证书)"
+  lane :build_appstore do
+    sh("cd .. && npx cap sync")
+
+    gym(
+      workspace: "ios/App/App.xcworkspace",
+      scheme: "App",
+      configuration: "Release",
+      export_method: "app-store",
+      build_path: "build",
+      output_directory: "build",
+      output_name: "GameCenter-appstore.ipa"
+    )
+  end
+
+  desc "构建模拟器版本"
+  lane :build_simulator do
+    sh("cd .. && npx cap sync")
+
+    xcodebuild(
+      workspace: "ios/App/App.xcworkspace",
+      scheme: "App",
+      configuration: "Debug",
+      sdk: "iphonesimulator",
+      destination: "platform=iOS Simulator,name=iPad (10th generation)",
+      build: true
+    )
+  end
+end

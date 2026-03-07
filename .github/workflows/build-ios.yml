@@ -1,0 +1,107 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+
+    - name: Install dependencies
+      run: |
+        cd ios-app
+        npm install
+
+    - name: Add iOS platform
+      run: |
+        cd ios-app
+        npx cap add ios
+
+    - name: Sync Capacitor
+      run: |
+        cd ios-app
+        npx cap sync
+
+    - name: Build IPA (unsigned)
+      run: |
+        cd ios-app/ios/App
+        xcodebuild -workspace App.xcworkspace \
+          -scheme App \
+          -configuration Release \
+          -sdk iphoneos \
+          -destination generic/platform=iOS \
+          archive -archivePath $PWD/build/App.xcarchive \
+          CODE_SIGNING_ALLOWED=NO \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGN_IDENTITY="" \
+          | xcpretty
+
+    - name: Export unsigned IPA
+      run: |
+        cd ios-app/ios/App
+        # 创建导出目录
+        mkdir -p $PWD/build/Payload
+        # 复制 app 文件
+        cp -r $PWD/build/App.xcarchive/Products/Applications/App.app $PWD/build/Payload/
+        # 打包成 ipa
+        cd $PWD/build
+        zip -r ../GameCenter-unsigned.ipa Payload
+
+    - name: Upload IPA artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: GameCenter-unsigned-ipa
+        path: ios-app/ios/App/GameCenter-unsigned.ipa
+
+  build-simulator:
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+
+    - name: Install dependencies
+      run: |
+        cd ios-app
+        npm install
+
+    - name: Add iOS platform
+      run: |
+        cd ios-app
+        npx cap add ios
+
+    - name: Sync Capacitor
+      run: |
+        cd ios-app
+        npx cap sync
+
+    - name: Build for Simulator
+      run: |
+        cd ios-app/ios/App
+        xcodebuild -workspace App.xcworkspace \
+          -scheme App \
+          -configuration Debug \
+          -sdk iphonesimulator \
+          -destination 'platform=iOS Simulator,name=iPad (10th generation)' \
+          build \
+          | xcpretty
+
+    - name: Upload Simulator App
+      uses: actions/upload-artifact@v3
+      with:
+        name: GameCenter-Simulator
+        path: ios-app/ios/App/build/Debug-iphonesimulator/App.app

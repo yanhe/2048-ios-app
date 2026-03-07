@@ -1,0 +1,5 @@
+# Appfile
+app_identifier("com.yourcompany.gamecenter")
+apple_id("your-apple-id@example.com")
+itc_team_id("12345678")
+team_id("ABCDE12345")
