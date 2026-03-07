@@ -10,10 +10,10 @@ jobs:
     runs-on: macos-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Setup Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: '18'
 
@@ -58,7 +58,7 @@ jobs:
         zip -r ../GameCenter-unsigned.ipa Payload
 
     - name: Upload IPA artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: GameCenter-unsigned-ipa
         path: ios-app/ios/App/GameCenter-unsigned.ipa
@@ -67,10 +67,10 @@ jobs:
     runs-on: macos-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Setup Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: '18'
 
@@ -101,7 +101,7 @@ jobs:
           | xcpretty
 
     - name: Upload Simulator App
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: GameCenter-Simulator
         path: ios-app/ios/App/build/Debug-iphonesimulator/App.app
