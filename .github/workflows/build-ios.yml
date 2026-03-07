@@ -18,23 +18,17 @@ jobs:
         node-version: '18'
 
     - name: Install dependencies
-      run: |
-        cd ios-app
-        npm install
+      run: npm install
 
     - name: Add iOS platform
-      run: |
-        cd ios-app
-        npx cap add ios
+      run: npx cap add ios
 
     - name: Sync Capacitor
-      run: |
-        cd ios-app
-        npx cap sync
+      run: npx cap sync
 
     - name: Build IPA (unsigned)
       run: |
-        cd ios-app/ios/App
+        cd ios/App
         xcodebuild -workspace App.xcworkspace \
           -scheme App \
           -configuration Release \
@@ -48,7 +42,7 @@ jobs:
 
     - name: Export unsigned IPA
       run: |
-        cd ios-app/ios/App
+        cd ios/App
         # 创建导出目录
         mkdir -p $PWD/build/Payload
         # 复制 app 文件
@@ -61,7 +55,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: GameCenter-unsigned-ipa
-        path: ios-app/ios/App/GameCenter-unsigned.ipa
+        path: ios/App/GameCenter-unsigned.ipa
 
   build-simulator:
     runs-on: macos-latest
@@ -75,23 +69,17 @@ jobs:
         node-version: '18'
 
     - name: Install dependencies
-      run: |
-        cd ios-app
-        npm install
+      run: npm install
 
     - name: Add iOS platform
-      run: |
-        cd ios-app
-        npx cap add ios
+      run: npx cap add ios
 
     - name: Sync Capacitor
-      run: |
-        cd ios-app
-        npx cap sync
+      run: npx cap sync
 
     - name: Build for Simulator
       run: |
-        cd ios-app/ios/App
+        cd ios/App
         xcodebuild -workspace App.xcworkspace \
           -scheme App \
           -configuration Debug \
@@ -104,4 +92,4 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: GameCenter-Simulator
-        path: ios-app/ios/App/build/Debug-iphonesimulator/App.app
+        path: ios/App/build/Debug-iphonesimulator/App.app
