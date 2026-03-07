@@ -26,6 +26,13 @@ jobs:
     - name: Sync Capacitor
       run: npx cap sync
 
+    - name: Verify web resources
+      run: |
+        echo "Checking ios/App/App/public directory..."
+        ls -la ios/App/App/public/ || echo "public directory not found!"
+        echo "Checking if index.html exists..."
+        test -f ios/App/App/public/index.html && echo "index.html found" || echo "index.html NOT found!"
+
     - name: Build IPA (unsigned)
       run: |
         cd ios/App
@@ -76,6 +83,13 @@ jobs:
 
     - name: Sync Capacitor
       run: npx cap sync
+
+    - name: Verify web resources
+      run: |
+        echo "Checking ios/App/App/public directory..."
+        ls -la ios/App/App/public/ || echo "public directory not found!"
+        echo "Checking if index.html exists..."
+        test -f ios/App/App/public/index.html && echo "index.html found" || echo "index.html NOT found!"
 
     - name: Build for Simulator
       run: |
