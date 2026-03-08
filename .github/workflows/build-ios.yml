@@ -33,6 +33,14 @@ jobs:
         echo "Checking if index.html exists..."
         test -f ios/App/App/public/index.html && echo "index.html found" || echo "index.html NOT found!"
 
+    - name: Fix iOS ATS for external CDN
+      run: |
+        # 修改 Info.plist 允许访问外部 CDN
+        /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" ios/App/App/Info.plist 2>/dev/null || true
+        /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" ios/App/App/Info.plist 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsArbitraryLoads true" ios/App/App/Info.plist
+        echo "Updated Info.plist:"
+        cat ios/App/App/Info.plist
+
     - name: Build IPA (unsigned)
       run: |
         cd ios/App
@@ -90,6 +98,12 @@ jobs:
         ls -la ios/App/App/public/ || echo "public directory not found!"
         echo "Checking if index.html exists..."
         test -f ios/App/App/public/index.html && echo "index.html found" || echo "index.html NOT found!"
+
+    - name: Fix iOS ATS for external CDN
+      run: |
+        # 修改 Info.plist 允许访问外部 CDN
+        /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" ios/App/App/Info.plist 2>/dev/null || true
+        /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" ios/App/App/Info.plist 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsArbitraryLoads true" ios/App/App/Info.plist
 
     - name: Build for Simulator
       run: |
