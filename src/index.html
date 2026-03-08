@@ -25,7 +25,7 @@
             transition: all 0.1s ease;
         }
         .direction-btn:active { transform: scale(0.95); box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 2px 4px rgba(0,0,0,0.2); }
-        .game-board-2048 { touch-action: none; user-select: none; -webkit-user-select: none; }
+        .game-board-2048 { touch-action: none; user-select: none; -webkit-user-select: none; position: relative; }
         .sudoku-cell { transition: all 0.15s ease; cursor: pointer; }
         .sudoku-cell:hover:not(.fixed) { background: #f5f5f5; }
         .sudoku-cell.selected { background: #1976d2 !important; color: white !important; }
@@ -192,6 +192,8 @@
                 touchStart.current = null;
             };
 
+            const boardSize = GRID_SIZE_2048 * TILE_SIZE + (GRID_SIZE_2048 + 1) * GAP;
+
             return (
                 <div className="min-h-screen flex flex-col items-center justify-center p-8">
                     <div className="flex items-center gap-6 mb-6">
@@ -207,9 +209,9 @@
                     </div>
                     <div className="flex gap-4 mb-4 items-center">
                         <button onClick={() => move('left')} className="direction-btn w-16 h-16 rounded-xl text-white text-2xl font-bold">←</button>
-                        <div className="game-board-2048 bg-[#bbada0] rounded-xl p-3" style={{ width: GRID_SIZE_2048 * TILE_SIZE + (GRID_SIZE_2048 + 1) * GAP, height: GRID_SIZE_2048 * TILE_SIZE + (GRID_SIZE_2048 + 1) * GAP }} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+                        <div className="game-board-2048 bg-[#bbada0] rounded-xl p-3" style={{ width: boardSize, height: boardSize }} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
                             {board.map((row, r) => row.map((cell, c) => (
-                                <div key={`${r}-${c}`} style={{ position: 'absolute', width: TILE_SIZE, height: TILE_SIZE, left: 12 + c * (TILE_SIZE + GAP), top: 12 + r * (TILE_SIZE + GAP), backgroundColor: cell ? getTileColor(cell).bg : 'rgba(238, 228, 218, 0.35)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: cell > 512 ? 40 : 50, fontWeight: 'bold', color: getTileColor(cell).text, transition: 'all 0.15s ease' }} className={cell ? 'tile-new' : ''}>{cell || ''}</div>
+                                <div key={`${r}-${c}`} style={{ position: 'absolute', width: TILE_SIZE, height: TILE_SIZE, left: GAP + c * (TILE_SIZE + GAP), top: GAP + r * (TILE_SIZE + GAP), backgroundColor: cell ? getTileColor(cell).bg : 'rgba(238, 228, 218, 0.35)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: cell > 512 ? 40 : 50, fontWeight: 'bold', color: getTileColor(cell).text, transition: 'all 0.15s ease' }} className={cell ? 'tile-new' : ''}>{cell || ''}</div>
                             )))}
                         </div>
                         <button onClick={() => move('right')} className="direction-btn w-16 h-16 rounded-xl text-white text-2xl font-bold">→</button>
@@ -232,50 +234,131 @@
         };
 
         // ==================== 数独游戏 ====================
-        const Sudoku = ({ onBack, onUpdateStats }) => {
-            const generateSudoku = () => {
-                const board = Array(9).fill(null).map(() => Array(9).fill(0));
-                const solve = (b) => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (b[r][c] === 0) { for (let n = 1; n <= 9; n++) if (isValid(b, r, c, n)) { b[r][c] = n; if (solve(b)) return true; b[r][c] = 0; } return false; } return true; };
-                const isValid = (b, r, c, n) => { for (let i = 0; i < 9; i++) if (b[r][i] === n || b[i][c] === n) return false; const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3; for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) if (b[br + i][bc + j] === n) return false; return true; };
-                for (let i = 0; i < 9; i += 3) { const nums = [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => Math.random() - 0.5); for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) board[i + r][i + c] = nums[r * 3 + c]; }
-                solve(board);
-                const puzzle = board.map(row => [...row]);
-                let removed = 0;
-                while (removed < 40) { const r = Math.floor(Math.random() * 9), c = Math.floor(Math.random() * 9); if (puzzle[r][c] !== 0) { puzzle[r][c] = 0; removed++; } }
-                return { puzzle, solution: board };
-            };
+        const DIFFICULTY_SETTINGS = {
+            easy: { emptyCount: 30, name: '简易' },
+            medium: { emptyCount: 45, name: '中等' },
+            hard: { emptyCount: 55, name: '困难' }
+        };
 
-            const [{ puzzle, solution }, setGame] = useState(() => generateSudoku());
-            const [board, setBoard] = useState(puzzle);
+        const Sudoku = ({ onBack, onUpdateStats }) => {
+            const [difficulty, setDifficulty] = useState(null);
+            const [gameState, setGameState] = useState(null);
+            const [board, setBoard] = useState(null);
+            const [solution, setSolution] = useState(null);
+            const [fixed, setFixed] = useState(null);
             const [selected, setSelected] = useState(null);
-            const [fixed, setFixed] = useState(() => puzzle.map((row, r) => row.map((cell, c) => cell !== 0)));
             const [notes, setNotes] = useState(() => Array(9).fill(null).map(() => Array(9).fill(null).map(() => [])));
             const [noteMode, setNoteMode] = useState(false);
             const [timer, setTimer] = useState(0);
             const [completed, setCompleted] = useState(false);
 
-            useEffect(() => { const interval = setInterval(() => setTimer(t => t + 1), 1000); return () => clearInterval(interval); }, []);
+            const generateSudoku = (diff) => {
+                const board = Array(9).fill(null).map(() => Array(9).fill(0));
+                const isValid = (b, r, c, n) => { for (let i = 0; i < 9; i++) if (b[r][i] === n || b[i][c] === n) return false; const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3; for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) if (b[br + i][bc + j] === n) return false; return true; };
+                const solve = (b) => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (b[r][c] === 0) { for (let n = 1; n <= 9; n++) if (isValid(b, r, c, n)) { b[r][c] = n; if (solve(b)) return true; b[r][c] = 0; } return false; } return true; };
+
+                // 填充对角线的3x3宫格
+                for (let i = 0; i < 9; i += 3) { const nums = [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => Math.random() - 0.5); for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) board[i + r][i + c] = nums[r * 3 + c]; }
+                solve(board);
+
+                const fullSolution = board.map(row => [...row]);
+                const puzzle = board.map(row => [...row]);
+                const emptyCount = DIFFICULTY_SETTINGS[diff].emptyCount;
+                let removed = 0;
+                const positions = [];
+                for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) positions.push([r, c]);
+                positions.sort(() => Math.random() - 0.5);
+
+                for (const [r, c] of positions) {
+                    if (removed >= emptyCount) break;
+                    if (puzzle[r][c] !== 0) { puzzle[r][c] = 0; removed++; }
+                }
+
+                return { puzzle, solution: fullSolution };
+            };
+
+            const startGame = (diff) => {
+                const { puzzle, solution } = generateSudoku(diff);
+                setDifficulty(diff);
+                setBoard(puzzle);
+                setSolution(solution);
+                setFixed(puzzle.map((row, r) => row.map((cell, c) => cell !== 0)));
+                setNotes(Array(9).fill(null).map(() => Array(9).fill(null).map(() => [])));
+                setTimer(0);
+                setCompleted(false);
+                setSelected(null);
+                setGameState('playing');
+            };
+
+            const reset = () => {
+                setDifficulty(null);
+                setGameState(null);
+                setBoard(null);
+                setSolution(null);
+                setFixed(null);
+                setNotes(Array(9).fill(null).map(() => Array(9).fill(null).map(() => [])));
+                setTimer(0);
+                setCompleted(false);
+                setSelected(null);
+            };
+
             useEffect(() => {
+                if (gameState !== 'playing') return;
+                const interval = setInterval(() => setTimer(t => t + 1), 1000);
+                return () => clearInterval(interval);
+            }, [gameState]);
+
+            useEffect(() => {
+                if (!board || !solution || gameState !== 'playing') return;
                 let solved = true;
                 for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (board[r][c] !== solution[r][c]) { solved = false; break; }
                 if (solved && !completed) { setCompleted(true); onUpdateStats('sudoku', { completed: true, time: timer, gamesPlayed: true }); }
-            }, [board, solution, completed, timer, onUpdateStats]);
+            }, [board, solution, completed, timer, onUpdateStats, gameState]);
 
             const handleCellClick = (r, c) => setSelected([r, c]);
             const handleNumberInput = (n) => {
-                if (!selected) return;
+                if (!selected || !board) return;
                 const [r, c] = selected;
                 if (fixed[r][c]) return;
                 if (noteMode) { setNotes(prev => { const next = prev.map(row => row.map(cell => [...cell])); const idx = next[r][c].indexOf(n); if (idx > -1) next[r][c].splice(idx, 1); else next[r][c].push(n); return next; }); }
                 else { setBoard(prev => { const next = prev.map(row => [...row]); next[r][c] = n; return next; }); setNotes(prev => { const next = prev.map(row => row.map(cell => [...cell])); next[r][c] = []; return next; }); }
             };
-            const reset = () => { const g = generateSudoku(); setGame(g); setBoard(g.puzzle); setFixed(g.puzzle.map((row, r) => row.map((cell, c) => cell !== 0))); setNotes(Array(9).fill(null).map(() => Array(9).fill(null).map(() => []))); setTimer(0); setCompleted(false); setSelected(null); };
+
+            if (!difficulty || gameState !== 'playing') {
+                return (
+                    <div className="min-h-screen flex flex-col items-center justify-center p-8">
+                        <div className="flex items-center gap-6 mb-8">
+                            <button onClick={onBack} className="text-2xl font-bold text-gray-600 hover:text-gray-800 transition-colors">← 返回</button>
+                            <h1 className="text-6xl font-bold text-blue-600">数独</h1>
+                        </div>
+                        <p className="text-gray-600 mb-8 text-xl">选择难度开始游戏</p>
+                        <div className="flex gap-6">
+                            <button onClick={() => startGame('easy')} className="bg-green-500 hover:bg-green-600 text-white text-2xl font-bold py-6 px-12 rounded-2xl shadow-lg transition-colors">
+                                <div>简易</div>
+                                <div className="text-sm font-normal mt-1">预填较多数字</div>
+                            </button>
+                            <button onClick={() => startGame('medium')} className="bg-yellow-500 hover:bg-yellow-600 text-white text-2xl font-bold py-6 px-12 rounded-2xl shadow-lg transition-colors">
+                                <div>中等</div>
+                                <div className="text-sm font-normal mt-1">平衡难度</div>
+                            </button>
+                            <button onClick={() => startGame('hard')} className="bg-red-500 hover:bg-red-600 text-white text-2xl font-bold py-6 px-12 rounded-2xl shadow-lg transition-colors">
+                                <div>困难</div>
+                                <div className="text-sm font-normal mt-1">预填较少数字</div>
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
 
             return (
                 <div className="min-h-screen flex flex-col items-center justify-center p-8">
                     <div className="flex items-center gap-6 mb-4">
-                        <button onClick={onBack} className="text-2xl font-bold text-gray-600 hover:text-gray-800 transition-colors">← 返回</button>
+                        <button onClick={reset} className="text-2xl font-bold text-gray-600 hover:text-gray-800 transition-colors">← 返回</button>
                         <h1 className="text-6xl font-bold text-blue-600">数独</h1>
+                        <div className="bg-blue-100 rounded-xl px-4 py-2 text-center">
+                            <div className="text-xs text-blue-600 font-bold">难度</div>
+                            <div className="text-lg font-bold text-blue-800">{DIFFICULTY_SETTINGS[difficulty].name}</div>
+                        </div>
                         <div className="bg-blue-100 rounded-xl px-6 py-3 text-center"><div className="text-sm text-blue-600 font-bold">时间</div><div className="text-3xl font-bold text-blue-800">{formatTime(timer)}</div></div>
                     </div>
                     <div className="bg-white rounded-2xl p-6 shadow-xl">
@@ -305,12 +388,56 @@
             );
         };
 
-        // ==================== 24点游戏 ====================
+        // ==================== 24点游戏 (简易模式 - 只加减法) ====================
         const Game24Point = ({ onBack, onUpdateStats }) => {
             const generateNumbers = () => {
-                while (true) { const nums = [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => Math.random() - 0.5).slice(0, 4); if (canSolve24(nums)) return nums; }
+                // 简易模式：生成可以通过加减法得到24的4个数字
+                while (true) {
+                    // 先生成解法，然后生成数字
+                    const patterns = [
+                        // a + b + c + d = 24
+                        () => {
+                            const a = Math.floor(Math.random() * 15) + 1;
+                            const b = Math.floor(Math.random() * Math.min(15, 24 - a - 2)) + 1;
+                            const c = Math.floor(Math.random() * Math.min(15, 24 - a - b - 1)) + 1;
+                            const d = 24 - a - b - c;
+                            if (d > 0 && d <= 20) return [a, b, c, d];
+                            return null;
+                        },
+                        // a + b + c - d = 24
+                        () => {
+                            const a = Math.floor(Math.random() * 15) + 10;
+                            const b = Math.floor(Math.random() * 10) + 1;
+                            const c = Math.floor(Math.random() * 10) + 1;
+                            const d = a + b + c - 24;
+                            if (d > 0 && d <= 20) return [a, b, c, d];
+                            return null;
+                        },
+                        // a + b - c + d = 24
+                        () => {
+                            const a = Math.floor(Math.random() * 15) + 10;
+                            const b = Math.floor(Math.random() * 10) + 1;
+                            const d = Math.floor(Math.random() * 10) + 1;
+                            const c = a + b + d - 24;
+                            if (c > 0 && c <= 20) return [a, b, c, d];
+                            return null;
+                        },
+                        // a - b + c + d = 24
+                        () => {
+                            const a = Math.floor(Math.random() * 10) + 15;
+                            const b = Math.floor(Math.random() * 8) + 1;
+                            const c = Math.floor(Math.random() * 10) + 1;
+                            const d = 24 - a + b - c;
+                            if (d > 0 && d <= 20) return [a, b, c, d];
+                            return null;
+                        }
+                    ];
+
+                    const pattern = patterns[Math.floor(Math.random() * patterns.length)];
+                    const nums = pattern();
+                    if (nums) return nums.sort(() => Math.random() - 0.5);
+                }
             };
-            const canSolve24 = (nums) => { const ops = ['+', '-', '*', '/']; const permute = (arr) => { if (arr.length <= 1) return [arr]; const res = []; for (let i = 0; i < arr.length; i++) { const rest = [...arr.slice(0, i), ...arr.slice(i + 1)]; for (const p of permute(rest)) res.push([arr[i], ...p]); } return res; }; const calc = (a, b, op) => { if (op === '+') return a + b; if (op === '-') return a - b; if (op === '*') return a * b; if (op === '/') return b !== 0 ? a / b : null; }; for (const p of permute(nums)) for (const o1 of ops) for (const o2 of ops) for (const o3 of ops) { let r1 = calc(calc(calc(p[0], p[1], o1), p[2], o2), p[3], o3); if (Math.abs(r1 - 24) < 0.0001) return true; } return false; };
 
             const [numbers, setNumbers] = useState(() => generateNumbers());
             const [expression, setExpression] = useState('');
@@ -329,7 +456,7 @@
                 const parts = expression.trim().split(' ');
                 if (parts.length === 0) return;
                 const last = parts[parts.length - 1];
-                if (!isNaN(last)) { const idx = usedIndices[usedIndices.length - 1]; setUsedIndices(prev => prev.slice(0, -1)); }
+                if (!isNaN(last)) { setUsedIndices(prev => prev.slice(0, -1)); }
                 setExpression(prev => parts.slice(0, -1).join(' '));
             };
             const checkAnswer = () => {
@@ -340,7 +467,7 @@
                         setCompleted(c => c + 1);
                         onUpdateStats('24point', { completed: true });
                         setTimeout(() => { setNumbers(generateNumbers()); setExpression(''); setUsedIndices([]); setResult(null); }, 1500);
-                    } else { setResult({ success: false, message: `等于 ${val.toFixed(2)}, 不是 24` }); onUpdateStats('24point', { attempt: true }); }
+                    } else { setResult({ success: false, message: `等于 ${val}, 不是 24` }); onUpdateStats('24point', { attempt: true }); }
                 } catch { setResult({ success: false, message: '表达式无效' }); }
             };
             const newProblem = () => { setNumbers(generateNumbers()); setExpression(''); setUsedIndices([]); setResult(null); };
@@ -352,7 +479,7 @@
                         <h1 className="text-6xl font-bold text-green-600">24点</h1>
                         <div className="bg-green-100 rounded-xl px-6 py-3 text-center"><div className="text-sm text-green-600 font-bold">已完成</div><div className="text-3xl font-bold text-green-800">{completed}</div></div>
                     </div>
-                    <p className="text-gray-600 mb-6 text-xl">使用 + - * / 让四个数字等于 24</p>
+                    <p className="text-gray-600 mb-6 text-xl">使用 + 和 - 让四个数字等于 24 (简易模式)</p>
                     <div className="flex gap-6 mb-6">
                         {numbers.map((n, i) => <button key={i} onClick={() => handleNumberClick(n, i)} disabled={usedIndices.includes(i)} className={`w-24 h-24 text-4xl font-bold rounded-2xl transition-all ${usedIndices.includes(i) ? 'bg-gray-200 text-gray-400' : 'bg-green-100 hover:bg-green-200 text-green-800 shadow-lg'}`}>{n}</button>)}
                     </div>
@@ -360,8 +487,8 @@
                         <div className="text-2xl font-mono text-gray-800 min-h-[40px]">{expression || '点击数字和运算符'}</div>
                     </div>
                     {result && <div className={`text-xl font-bold mb-4 ${result.success ? 'text-green-600' : 'text-red-600'}`}>{result.message}</div>}
-                    <div className="grid grid-cols-4 gap-3 mb-4">
-                        {['+', '-', '*', '/'].map(op => <button key={op} onClick={() => handleOperatorClick(op)} className="w-16 h-16 bg-green-600 hover:bg-green-700 text-white text-2xl font-bold rounded-xl">{op}</button>)}
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                        {['+', '-'].map(op => <button key={op} onClick={() => handleOperatorClick(op)} className="w-20 h-20 bg-green-600 hover:bg-green-700 text-white text-3xl font-bold rounded-xl">{op}</button>)}
                     </div>
                     <div className="flex gap-4">
                         <button onClick={handleClear} className="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-6 rounded-xl">清除</button>
