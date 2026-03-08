@@ -567,7 +567,7 @@
                 return 9 - count;
             };
 
-            // 数字按钮面板 - 三排布局
+            // 数字按钮面板 - 统一三横排布局
             const NumberPanel = () => {
                 const nums1 = [1, 2, 3, 4];
                 const nums2 = [5, 6, 7, 8];
@@ -580,49 +580,26 @@
                     </button>
                 );
 
-                if (isLandscape) {
-                    // 横屏：三竖排
-                    return (
-                        <div className="sudoku-controls flex gap-3">
-                            {/* 第一竖排：1-4 */}
-                            <div className="flex flex-col gap-2">
-                                {nums1.map(n => <NumberButton key={n} n={n} />)}
-                            </div>
-                            {/* 第二竖排：5-8 */}
-                            <div className="flex flex-col gap-2">
-                                {nums2.map(n => <NumberButton key={n} n={n} />)}
-                            </div>
-                            {/* 第三竖排：9 + 清除 + 标记 + 重来 */}
-                            <div className="flex flex-col gap-2">
-                                <NumberButton n={9} />
-                                <button onClick={() => selected && !fixed[selected[0]][selected[1]] && setBoard(prev => { const next = prev.map(row => [...row]); next[selected[0]][selected[1]] = 0; return next; })} className="w-16 h-16 bg-red-100 hover:bg-red-200 text-red-800 font-bold rounded-xl transition-colors">清除</button>
-                                <button onClick={() => setNoteMode(!noteMode)} className={`w-16 h-16 rounded-xl font-bold transition-colors text-sm ${noteMode ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>标记</button>
-                                <button onClick={reset} className="w-16 h-16 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm">重来</button>
-                            </div>
+                // 统一使用三横排布局，横屏和竖屏都是横排
+                return (
+                    <div className="sudoku-controls flex flex-col gap-2">
+                        {/* 第一横排：1-4 */}
+                        <div className="flex gap-2">
+                            {nums1.map(n => <NumberButton key={n} n={n} />)}
                         </div>
-                    );
-                } else {
-                    // 竖屏：三横排
-                    return (
-                        <div className="sudoku-controls flex flex-col gap-2">
-                            {/* 第一横排：1-4 */}
-                            <div className="flex gap-2">
-                                {nums1.map(n => <NumberButton key={n} n={n} />)}
-                            </div>
-                            {/* 第二横排：5-8 */}
-                            <div className="flex gap-2">
-                                {nums2.map(n => <NumberButton key={n} n={n} />)}
-                            </div>
-                            {/* 第三横排：9 + 清除 + 标记 + 重来 */}
-                            <div className="flex gap-2">
-                                <NumberButton n={9} />
-                                <button onClick={() => selected && !fixed[selected[0]][selected[1]] && setBoard(prev => { const next = prev.map(row => [...row]); next[selected[0]][selected[1]] = 0; return next; })} className="w-16 h-16 bg-red-100 hover:bg-red-200 text-red-800 font-bold rounded-xl transition-colors">清除</button>
-                                <button onClick={() => setNoteMode(!noteMode)} className={`w-16 h-16 rounded-xl font-bold transition-colors text-sm ${noteMode ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>标记</button>
-                                <button onClick={reset} className="w-16 h-16 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm">重来</button>
-                            </div>
+                        {/* 第二横排：5-8 */}
+                        <div className="flex gap-2">
+                            {nums2.map(n => <NumberButton key={n} n={n} />)}
                         </div>
-                    );
-                }
+                        {/* 第三横排：9 + 清除 + 标记 + 重来 */}
+                        <div className="flex gap-2">
+                            <NumberButton n={9} />
+                            <button onClick={() => selected && !fixed[selected[0]][selected[1]] && setBoard(prev => { const next = prev.map(row => [...row]); next[selected[0]][selected[1]] = 0; return next; })} className="w-16 h-16 bg-red-100 hover:bg-red-200 text-red-800 font-bold rounded-xl transition-colors">清除</button>
+                            <button onClick={() => setNoteMode(!noteMode)} className={`w-16 h-16 rounded-xl font-bold transition-colors text-sm ${noteMode ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>标记</button>
+                            <button onClick={reset} className="w-16 h-16 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm">重来</button>
+                        </div>
+                    </div>
+                );
             };
 
             return (
