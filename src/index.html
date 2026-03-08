@@ -35,6 +35,7 @@
         .game-card { transition: all 0.2s ease; }
         .game-card:hover { transform: translateY(-4px); box-shadow: 0 12px 30px rgba(0,0,0,0.15); }
         #error-log { position: fixed; top: 0; left: 0; right: 0; background: #ff4444; color: white; padding: 10px; z-index: 9999; font-size: 12px; max-height: 200px; overflow: auto; display: none; }
+        .back-btn { position: fixed; top: 20px; left: 20px; z-index: 100; }
     </style>
 </head>
 <body>
@@ -196,30 +197,18 @@
 
             return (
                 <div className="min-h-screen flex flex-col items-center justify-center p-8">
-                    <div className="flex items-center gap-6 mb-6">
-                        <button onClick={onBack} className="text-2xl font-bold text-gray-600 hover:text-gray-800 transition-colors">← 返回</button>
-                        <h1 className="text-6xl font-bold text-orange-600">2048</h1>
-                    </div>
+                    <button onClick={onBack} className="back-btn text-2xl font-bold text-gray-600 hover:text-gray-800 transition-colors bg-white/80 px-4 py-2 rounded-xl shadow">← 返回</button>
+                    <h1 className="text-6xl font-bold text-orange-600 mb-6">2048</h1>
                     <div className="flex gap-8 mb-6">
                         <div className="bg-orange-100 rounded-xl px-6 py-3 text-center"><div className="text-sm text-orange-600 font-bold">得分</div><div className="text-3xl font-bold text-orange-800">{score}</div></div>
                         <div className="bg-orange-100 rounded-xl px-6 py-3 text-center"><div className="text-sm text-orange-600 font-bold">最高分</div><div className="text-3xl font-bold text-orange-800">{bestScore}</div></div>
                     </div>
-                    <div className="flex gap-4 mb-4">
-                        <button onClick={() => move('up')} className="direction-btn w-16 h-16 rounded-xl text-white text-2xl font-bold">↑</button>
+                    <div className="game-board-2048 bg-[#bbada0] rounded-xl p-3 mb-6" style={{ width: boardSize, height: boardSize }} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+                        {board.map((row, r) => row.map((cell, c) => (
+                            <div key={`${r}-${c}`} style={{ position: 'absolute', width: TILE_SIZE, height: TILE_SIZE, left: GAP + c * (TILE_SIZE + GAP), top: GAP + r * (TILE_SIZE + GAP), backgroundColor: cell ? getTileColor(cell).bg : 'rgba(238, 228, 218, 0.35)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: cell > 512 ? 40 : 50, fontWeight: 'bold', color: getTileColor(cell).text, transition: 'all 0.15s ease' }} className={cell ? 'tile-new' : ''}>{cell || ''}</div>
+                        )))}
                     </div>
-                    <div className="flex gap-4 mb-4 items-center">
-                        <button onClick={() => move('left')} className="direction-btn w-16 h-16 rounded-xl text-white text-2xl font-bold">←</button>
-                        <div className="game-board-2048 bg-[#bbada0] rounded-xl p-3" style={{ width: boardSize, height: boardSize }} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-                            {board.map((row, r) => row.map((cell, c) => (
-                                <div key={`${r}-${c}`} style={{ position: 'absolute', width: TILE_SIZE, height: TILE_SIZE, left: GAP + c * (TILE_SIZE + GAP), top: GAP + r * (TILE_SIZE + GAP), backgroundColor: cell ? getTileColor(cell).bg : 'rgba(238, 228, 218, 0.35)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: cell > 512 ? 40 : 50, fontWeight: 'bold', color: getTileColor(cell).text, transition: 'all 0.15s ease' }} className={cell ? 'tile-new' : ''}>{cell || ''}</div>
-                            )))}
-                        </div>
-                        <button onClick={() => move('right')} className="direction-btn w-16 h-16 rounded-xl text-white text-2xl font-bold">→</button>
-                    </div>
-                    <div className="flex gap-4 mb-4">
-                        <button onClick={() => move('down')} className="direction-btn w-16 h-16 rounded-xl text-white text-2xl font-bold">↓</button>
-                    </div>
-                    <button onClick={reset} className="mt-4 bg-orange-600 hover:bg-orange-700 text-white text-xl font-bold py-3 px-8 rounded-xl transition-colors">重新开始</button>
+                    <button onClick={reset} className="bg-orange-600 hover:bg-orange-700 text-white text-xl font-bold py-3 px-8 rounded-xl transition-colors">重新开始</button>
                     {(gameOver || won) && (
                         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
                             <div className="bg-white rounded-3xl p-10 text-center">
@@ -234,10 +223,11 @@
         };
 
         // ==================== 数独游戏 ====================
+        // 参考网上设计：简易约35-40个提示，中等约45-50个提示，困难约55-60个提示
         const DIFFICULTY_SETTINGS = {
-            easy: { emptyCount: 30, name: '简易' },
-            medium: { emptyCount: 45, name: '中等' },
-            hard: { emptyCount: 55, name: '困难' }
+            easy: { emptyCount: 40, name: '简易', hints: 41 },      // 81-40=41个预填
+            medium: { emptyCount: 50, name: '中等', hints: 31 },    // 81-50=31个预填
+            hard: { emptyCount: 60, name: '困难', hints: 21 }       // 81-60=21个预填
         };
 
         const Sudoku = ({ onBack, onUpdateStats }) => {
@@ -252,18 +242,33 @@
             const [timer, setTimer] = useState(0);
             const [completed, setCompleted] = useState(false);
 
-            const generateSudoku = (diff) => {
+            const generateCompleteBoard = () => {
                 const board = Array(9).fill(null).map(() => Array(9).fill(0));
-                const isValid = (b, r, c, n) => { for (let i = 0; i < 9; i++) if (b[r][i] === n || b[i][c] === n) return false; const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3; for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) if (b[br + i][bc + j] === n) return false; return true; };
-                const solve = (b) => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (b[r][c] === 0) { for (let n = 1; n <= 9; n++) if (isValid(b, r, c, n)) { b[r][c] = n; if (solve(b)) return true; b[r][c] = 0; } return false; } return true; };
-
-                // 填充对角线的3x3宫格
-                for (let i = 0; i < 9; i += 3) { const nums = [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => Math.random() - 0.5); for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) board[i + r][i + c] = nums[r * 3 + c]; }
+                const isValid = (b, r, c, n) => {
+                    for (let i = 0; i < 9; i++) if (b[r][i] === n || b[i][c] === n) return false;
+                    const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3;
+                    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) if (b[br + i][bc + j] === n) return false;
+                    return true;
+                };
+                const solve = (b) => {
+                    for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (b[r][c] === 0) {
+                        const nums = [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => Math.random() - 0.5);
+                        for (const n of nums) if (isValid(b, r, c, n)) { b[r][c] = n; if (solve(b)) return true; b[r][c] = 0; }
+                        return false;
+                    }
+                    return true;
+                };
                 solve(board);
+                return board;
+            };
 
-                const fullSolution = board.map(row => [...row]);
-                const puzzle = board.map(row => [...row]);
+            const generateSudoku = (diff) => {
+                // 生成完整解
+                const fullSolution = generateCompleteBoard();
+                const puzzle = fullSolution.map(row => [...row]);
                 const emptyCount = DIFFICULTY_SETTINGS[diff].emptyCount;
+
+                // 随机挖空
                 let removed = 0;
                 const positions = [];
                 for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) positions.push([r, c]);
@@ -327,23 +332,21 @@
             if (!difficulty || gameState !== 'playing') {
                 return (
                     <div className="min-h-screen flex flex-col items-center justify-center p-8">
-                        <div className="flex items-center gap-6 mb-8">
-                            <button onClick={onBack} className="text-2xl font-bold text-gray-600 hover:text-gray-800 transition-colors">← 返回</button>
-                            <h1 className="text-6xl font-bold text-blue-600">数独</h1>
-                        </div>
+                        <button onClick={onBack} className="back-btn text-2xl font-bold text-gray-600 hover:text-gray-800 transition-colors bg-white/80 px-4 py-2 rounded-xl shadow">← 返回</button>
+                        <h1 className="text-6xl font-bold text-blue-600 mb-8">数独</h1>
                         <p className="text-gray-600 mb-8 text-xl">选择难度开始游戏</p>
                         <div className="flex gap-6">
                             <button onClick={() => startGame('easy')} className="bg-green-500 hover:bg-green-600 text-white text-2xl font-bold py-6 px-12 rounded-2xl shadow-lg transition-colors">
                                 <div>简易</div>
-                                <div className="text-sm font-normal mt-1">预填较多数字</div>
+                                <div className="text-sm font-normal mt-1">预填41个数字</div>
                             </button>
                             <button onClick={() => startGame('medium')} className="bg-yellow-500 hover:bg-yellow-600 text-white text-2xl font-bold py-6 px-12 rounded-2xl shadow-lg transition-colors">
                                 <div>中等</div>
-                                <div className="text-sm font-normal mt-1">平衡难度</div>
+                                <div className="text-sm font-normal mt-1">预填31个数字</div>
                             </button>
                             <button onClick={() => startGame('hard')} className="bg-red-500 hover:bg-red-600 text-white text-2xl font-bold py-6 px-12 rounded-2xl shadow-lg transition-colors">
                                 <div>困难</div>
-                                <div className="text-sm font-normal mt-1">预填较少数字</div>
+                                <div className="text-sm font-normal mt-1">预填21个数字</div>
                             </button>
                         </div>
                     </div>
@@ -352,8 +355,8 @@
 
             return (
                 <div className="min-h-screen flex flex-col items-center justify-center p-8">
-                    <div className="flex items-center gap-6 mb-4">
-                        <button onClick={reset} className="text-2xl font-bold text-gray-600 hover:text-gray-800 transition-colors">← 返回</button>
+                    <button onClick={reset} className="back-btn text-2xl font-bold text-gray-600 hover:text-gray-800 transition-colors bg-white/80 px-4 py-2 rounded-xl shadow">← 返回</button>
+                    <div className="flex items-center gap-6 mb-4 mt-16">
                         <h1 className="text-6xl font-bold text-blue-600">数独</h1>
                         <div className="bg-blue-100 rounded-xl px-4 py-2 text-center">
                             <div className="text-xs text-blue-600 font-bold">难度</div>
@@ -393,7 +396,6 @@
             const generateNumbers = () => {
                 // 简易模式：生成可以通过加减法得到24的4个数字
                 while (true) {
-                    // 先生成解法，然后生成数字
                     const patterns = [
                         // a + b + c + d = 24
                         () => {
@@ -474,8 +476,8 @@
 
             return (
                 <div className="min-h-screen flex flex-col items-center justify-center p-8">
-                    <div className="flex items-center gap-6 mb-6">
-                        <button onClick={onBack} className="text-2xl font-bold text-gray-600 hover:text-gray-800 transition-colors">← 返回</button>
+                    <button onClick={onBack} className="back-btn text-2xl font-bold text-gray-600 hover:text-gray-800 transition-colors bg-white/80 px-4 py-2 rounded-xl shadow">← 返回</button>
+                    <div className="flex items-center gap-6 mb-6 mt-16">
                         <h1 className="text-6xl font-bold text-green-600">24点</h1>
                         <div className="bg-green-100 rounded-xl px-6 py-3 text-center"><div className="text-sm text-green-600 font-bold">已完成</div><div className="text-3xl font-bold text-green-800">{completed}</div></div>
                     </div>
@@ -487,10 +489,10 @@
                         <div className="text-2xl font-mono text-gray-800 min-h-[40px]">{expression || '点击数字和运算符'}</div>
                     </div>
                     {result && <div className={`text-xl font-bold mb-4 ${result.success ? 'text-green-600' : 'text-red-600'}`}>{result.message}</div>}
-                    <div className="grid grid-cols-2 gap-3 mb-4">
+                    <div className="grid grid-cols-2 gap-3 mb-8">
                         {['+', '-'].map(op => <button key={op} onClick={() => handleOperatorClick(op)} className="w-20 h-20 bg-green-600 hover:bg-green-700 text-white text-3xl font-bold rounded-xl">{op}</button>)}
                     </div>
-                    <div className="flex gap-4">
+                    <div className="flex gap-4 mt-8">
                         <button onClick={handleClear} className="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-6 rounded-xl">清除</button>
                         <button onClick={handleBackspace} className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 px-6 rounded-xl">退格</button>
                         <button onClick={checkAnswer} className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-xl">检查</button>
