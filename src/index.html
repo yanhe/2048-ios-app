@@ -19,23 +19,27 @@
         }
         .tile-new { animation: appear 0.2s ease-in-out; }
         @keyframes appear { 0% { opacity: 0; transform: scale(0); } 100% { opacity: 1; transform: scale(1); } }
-        .direction-btn {
-            background: linear-gradient(145deg, #9e8570, #8f7a66);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.2);
-            transition: all 0.1s ease;
-        }
-        .direction-btn:active { transform: scale(0.95); box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 2px 4px rgba(0,0,0,0.2); }
         .game-board-2048 { touch-action: none; user-select: none; -webkit-user-select: none; position: relative; }
-        .sudoku-cell { transition: all 0.15s ease; cursor: pointer; }
-        .sudoku-cell:hover:not(.fixed) { background: #f5f5f5; }
+        .sudoku-cell { transition: all 0.15s ease; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .sudoku-cell:hover:not(.fixed-cell) { background: #f5f5f5; }
         .sudoku-cell.selected { background: #1976d2 !important; color: white !important; }
-        .sudoku-cell.highlight { background: #e3f2fd; }
         .sudoku-cell.same-number { background: #bbdefb; }
+        .sudoku-cell.fixed-cell { color: #1a237e; background: #e8eaf6; font-weight: bold; }
         .note-grid { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); width: 100%; height: 100%; font-size: 10px; color: #757575; }
         .game-card { transition: all 0.2s ease; }
         .game-card:hover { transform: translateY(-4px); box-shadow: 0 12px 30px rgba(0,0,0,0.15); }
         #error-log { position: fixed; top: 0; left: 0; right: 0; background: #ff4444; color: white; padding: 10px; z-index: 9999; font-size: 12px; max-height: 200px; overflow: auto; display: none; }
-        .back-btn { position: fixed; top: 20px; left: 20px; z-index: 100; }
+        .back-btn { position: fixed; top: 50px; left: 20px; z-index: 100; }
+        /* 数独宫格边框样式 */
+        .sudoku-grid { display: grid; grid-template-columns: repeat(9, 1fr); border: 3px solid #1e40af; }
+        .sudoku-cell { border: 1px solid #93c5fd; width: 50px; height: 50px; font-size: 24px; }
+        /* 每3列后的右边框加粗 */
+        .sudoku-cell:nth-child(3n) { border-right: 3px solid #1e40af; }
+        /* 最后一列不需要右边框 */
+        .sudoku-cell:nth-child(9n) { border-right: none; }
+        /* 每3行后的下边框加粗 */
+        .sudoku-cell:nth-child(n+19):nth-child(-n+27),
+        .sudoku-cell:nth-child(n+46):nth-child(-n+54) { border-bottom: 3px solid #1e40af; }
     </style>
 </head>
 <body>
@@ -67,9 +71,38 @@
             errorLog.style.display = 'block';
             errorLog.innerHTML += '<div><strong>Babel not loaded!</strong></div>';
         }
+
+        // 2048音效 - 使用Web Audio API
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playMoveSound() {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.type = 'sine';
+            oscillator.frequency.value = 300;
+            gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            oscillator.start(audioCtx.currentTime);
+            oscillator.stop(audioCtx.currentTime + 0.1);
+        }
+        function playMergeSound() {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.type = 'sine';
+            oscillator.frequency.value = 500;
+            gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+            oscillator.start(audioCtx.currentTime);
+            oscillator.stop(audioCtx.currentTime + 0.15);
+        }
     </script>
     <script type="text/babel">
-        const { useState, useEffect, useCallback, useRef, useMemo } = React;
+        const { useState, useEffect, useCallback, useRef } = React;
 
         const storage = {
             get: (key, defaultValue) => {
@@ -78,7 +111,6 @@
                     const item = localStorage.getItem(key);
                     return item ? JSON.parse(item) : defaultValue;
                 } catch (e) {
-                    console.error('localStorage error:', e);
                     return defaultValue;
                 }
             },
@@ -87,13 +119,15 @@
                     if (typeof localStorage !== 'undefined') {
                         localStorage.setItem(key, JSON.stringify(value));
                     }
-                } catch (e) {
-                    console.error('localStorage error:', e);
-                }
+                } catch (e) {}
             }
         };
 
-        const formatTime = (seconds) => { const mins = Math.floor(seconds / 60); const secs = seconds % 60; return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`; };
+        const formatTime = (seconds) => {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        };
 
         // ==================== 游戏选择 ====================
         const GameSelector = ({ onSelectGame, stats }) => (
@@ -154,27 +188,75 @@
             const [gameOver, setGameOver] = useState(false);
             const [won, setWon] = useState(false);
             const touchStart = useRef(null);
+            const prevBoardRef = useRef(null);
 
             const move = useCallback((direction) => {
                 if (gameOver) return;
                 let newBoard = board.map(row => [...row]);
-                let moved = false, newScore = 0;
-                const slide = (row) => { row = row.filter(val => val); for (let i = 0; i < row.length - 1; i++) if (row[i] === row[i + 1]) { row[i] *= 2; newScore += row[i]; if (row[i] === 2048 && !won) { setWon(true); onUpdateStats('2048', { wins: true }); } row.splice(i + 1, 1); } while (row.length < GRID_SIZE_2048) row.push(0); return row; };
-                if (direction === 'left') { for (let r = 0; r < GRID_SIZE_2048; r++) { const oldRow = [...newBoard[r]]; newBoard[r] = slide(newBoard[r]); if (oldRow.toString() !== newBoard[r].toString()) moved = true; } }
-                else if (direction === 'right') { for (let r = 0; r < GRID_SIZE_2048; r++) { const oldRow = [...newBoard[r]]; newBoard[r] = slide(newBoard[r].reverse()).reverse(); if (oldRow.toString() !== newBoard[r].toString()) moved = true; } }
-                else if (direction === 'up') { for (let c = 0; c < GRID_SIZE_2048; c++) { const col = slide([newBoard[0][c], newBoard[1][c], newBoard[2][c], newBoard[3][c]]); const oldCol = [board[0][c], board[1][c], board[2][c], board[3][c]]; for (let r = 0; r < GRID_SIZE_2048; r++) newBoard[r][c] = col[r]; if (oldCol.toString() !== col.toString()) moved = true; } }
-                else if (direction === 'down') { for (let c = 0; c < GRID_SIZE_2048; c++) { const col = slide([newBoard[3][c], newBoard[2][c], newBoard[1][c], newBoard[0][c]]).reverse(); const oldCol = [board[0][c], board[1][c], board[2][c], board[3][c]]; for (let r = 0; r < GRID_SIZE_2048; r++) newBoard[r][c] = col[r]; if (oldCol.toString() !== col.toString()) moved = true; } }
+                let moved = false, merged = false, newScore = 0;
+                const slide = (row) => {
+                    row = row.filter(val => val);
+                    for (let i = 0; i < row.length - 1; i++) {
+                        if (row[i] === row[i + 1]) {
+                            row[i] *= 2;
+                            newScore += row[i];
+                            merged = true;
+                            if (row[i] === 2048 && !won) { setWon(true); onUpdateStats('2048', { wins: true }); }
+                            row.splice(i + 1, 1);
+                        }
+                    }
+                    while (row.length < GRID_SIZE_2048) row.push(0);
+                    return row;
+                };
+                if (direction === 'left') {
+                    for (let r = 0; r < GRID_SIZE_2048; r++) {
+                        const oldRow = [...newBoard[r]];
+                        newBoard[r] = slide(newBoard[r]);
+                        if (oldRow.toString() !== newBoard[r].toString()) moved = true;
+                    }
+                }
+                else if (direction === 'right') {
+                    for (let r = 0; r < GRID_SIZE_2048; r++) {
+                        const oldRow = [...newBoard[r]];
+                        newBoard[r] = slide(newBoard[r].reverse()).reverse();
+                        if (oldRow.toString() !== newBoard[r].toString()) moved = true;
+                    }
+                }
+                else if (direction === 'up') {
+                    for (let c = 0; c < GRID_SIZE_2048; c++) {
+                        const col = slide([newBoard[0][c], newBoard[1][c], newBoard[2][c], newBoard[3][c]]);
+                        const oldCol = [board[0][c], board[1][c], board[2][c], board[3][c]];
+                        for (let r = 0; r < GRID_SIZE_2048; r++) newBoard[r][c] = col[r];
+                        if (oldCol.toString() !== col.toString()) moved = true;
+                    }
+                }
+                else if (direction === 'down') {
+                    for (let c = 0; c < GRID_SIZE_2048; c++) {
+                        const col = slide([newBoard[3][c], newBoard[2][c], newBoard[1][c], newBoard[0][c]]).reverse();
+                        const oldCol = [board[0][c], board[1][c], board[2][c], board[3][c]];
+                        for (let r = 0; r < GRID_SIZE_2048; r++) newBoard[r][c] = col[r];
+                        if (oldCol.toString() !== col.toString()) moved = true;
+                    }
+                }
                 if (moved) {
                     newBoard = addRandomTile2048(newBoard);
                     setBoard(newBoard);
                     const newTotalScore = score + newScore;
                     setScore(newTotalScore);
+                    // 播放音效
+                    if (merged) playMergeSound();
+                    else playMoveSound();
                     if (newTotalScore > bestScore) { setBestScore(newTotalScore); storage.set('2048-best', newTotalScore); }
                     if (!canMove(newBoard)) { setGameOver(true); onUpdateStats('2048', { bestScore: newTotalScore, gamesPlayed: true }); }
                 }
             }, [board, score, gameOver, won, bestScore, onUpdateStats]);
 
-            const canMove = (b) => { for (let r = 0; r < GRID_SIZE_2048; r++) for (let c = 0; c < GRID_SIZE_2048; c++) if (b[r][c] === 0) return true; for (let r = 0; r < GRID_SIZE_2048; r++) for (let c = 0; c < GRID_SIZE_2048 - 1; c++) if (b[r][c] === b[r][c + 1]) return true; for (let c = 0; c < GRID_SIZE_2048; c++) for (let r = 0; r < GRID_SIZE_2048 - 1; r++) if (b[r][c] === b[r + 1][c]) return true; return false; };
+            const canMove = (b) => {
+                for (let r = 0; r < GRID_SIZE_2048; r++) for (let c = 0; c < GRID_SIZE_2048; c++) if (b[r][c] === 0) return true;
+                for (let r = 0; r < GRID_SIZE_2048; r++) for (let c = 0; c < GRID_SIZE_2048 - 1; c++) if (b[r][c] === b[r][c + 1]) return true;
+                for (let c = 0; c < GRID_SIZE_2048; c++) for (let r = 0; r < GRID_SIZE_2048 - 1; r++) if (b[r][c] === b[r + 1][c]) return true;
+                return false;
+            };
             const reset = () => { const b = createEmptyBoard2048(); setBoard(addRandomTile2048(addRandomTile2048(b))); setScore(0); setGameOver(false); setWon(false); };
 
             useEffect(() => {
@@ -223,7 +305,7 @@
         };
 
         // ==================== 数独游戏 ====================
-        // 参考网上设计：简易约35-40个提示，中等约45-50个提示，困难约55-60个提示
+        // 参考标准数独设计：简易约35-40个提示，中等约45-50个提示，困难约55-60个提示
         const DIFFICULTY_SETTINGS = {
             easy: { emptyCount: 40, name: '简易', hints: 41 },      // 81-40=41个预填
             medium: { emptyCount: 50, name: '中等', hints: 31 },    // 81-50=31个预填
@@ -329,6 +411,20 @@
                 else { setBoard(prev => { const next = prev.map(row => [...row]); next[r][c] = n; return next; }); setNotes(prev => { const next = prev.map(row => row.map(cell => [...cell])); next[r][c] = []; return next; }); }
             };
 
+            // 获取单元格边框样式
+            const getCellStyle = (r, c) => {
+                let style = {};
+                // 右边框 - 第2、5列后加粗
+                if ((c + 1) % 3 === 0 && c !== 8) {
+                    style.borderRight = '3px solid #1e40af';
+                }
+                // 下边框 - 第2、5行后加粗
+                if ((r + 1) % 3 === 0 && r !== 8) {
+                    style.borderBottom = '3px solid #1e40af';
+                }
+                return style;
+            };
+
             if (!difficulty || gameState !== 'playing') {
                 return (
                     <div className="min-h-screen flex flex-col items-center justify-center p-8">
@@ -353,6 +449,8 @@
                 );
             }
 
+            const selectedValue = selected ? board[selected[0]][selected[1]] : null;
+
             return (
                 <div className="min-h-screen flex flex-col items-center justify-center p-8">
                     <button onClick={reset} className="back-btn text-2xl font-bold text-gray-600 hover:text-gray-800 transition-colors bg-white/80 px-4 py-2 rounded-xl shadow">← 返回</button>
@@ -364,14 +462,19 @@
                         </div>
                         <div className="bg-blue-100 rounded-xl px-6 py-3 text-center"><div className="text-sm text-blue-600 font-bold">时间</div><div className="text-3xl font-bold text-blue-800">{formatTime(timer)}</div></div>
                     </div>
-                    <div className="bg-white rounded-2xl p-6 shadow-xl">
-                        <div className="grid grid-cols-9 gap-0 border-4 border-blue-800 rounded-lg overflow-hidden">
+                    <div className="bg-white rounded-2xl p-4 shadow-xl">
+                        <div className="grid grid-cols-9" style={{ border: '3px solid #1e40af' }}>
                             {board.map((row, r) => row.map((cell, c) => {
                                 const isSelected = selected && selected[0] === r && selected[1] === c;
-                                const isHighlight = selected && (selected[0] === r || selected[1] === c);
-                                const isSameNumber = selected && board[selected[0]][selected[1]] !== 0 && board[selected[0]][selected[1]] === cell;
+                                const isSameNumber = selectedValue !== 0 && cell === selectedValue;
+                                const isFixed = fixed[r][c];
                                 return (
-                                    <div key={`${r}-${c}`} onClick={() => handleCellClick(r, c)} className={`sudoku-cell w-14 h-14 flex items-center justify-center text-2xl font-bold border border-blue-300 ${fixed[r][c] ? 'fixed text-blue-900 bg-gray-100' : 'text-blue-600'} ${isSelected ? 'selected' : ''} ${isHighlight ? 'highlight' : ''} ${isSameNumber ? 'same-number' : ''} ${(r + 1) % 3 === 0 && r !== 8 ? 'border-b-4 border-b-blue-800' : ''} ${(c + 1) % 3 === 0 && c !== 8 ? 'border-r-4 border-r-blue-800' : ''}`}>
+                                    <div
+                                        key={`${r}-${c}`}
+                                        onClick={() => handleCellClick(r, c)}
+                                        className={`sudoku-cell ${isFixed ? 'fixed-cell' : ''} ${isSelected ? 'selected' : ''} ${isSameNumber && !isSelected ? 'same-number' : ''}`}
+                                        style={getCellStyle(r, c)}
+                                    >
                                         {cell !== 0 ? cell : notes[r][c].length > 0 ? <div className="note-grid">{[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => <div key={n}>{notes[r][c].includes(n) ? n : ''}</div>)}</div> : ''}
                                     </div>
                                 );
@@ -394,10 +497,8 @@
         // ==================== 24点游戏 (简易模式 - 只加减法) ====================
         const Game24Point = ({ onBack, onUpdateStats }) => {
             const generateNumbers = () => {
-                // 简易模式：生成可以通过加减法得到24的4个数字
                 while (true) {
                     const patterns = [
-                        // a + b + c + d = 24
                         () => {
                             const a = Math.floor(Math.random() * 15) + 1;
                             const b = Math.floor(Math.random() * Math.min(15, 24 - a - 2)) + 1;
@@ -406,7 +507,6 @@
                             if (d > 0 && d <= 20) return [a, b, c, d];
                             return null;
                         },
-                        // a + b + c - d = 24
                         () => {
                             const a = Math.floor(Math.random() * 15) + 10;
                             const b = Math.floor(Math.random() * 10) + 1;
@@ -415,7 +515,6 @@
                             if (d > 0 && d <= 20) return [a, b, c, d];
                             return null;
                         },
-                        // a + b - c + d = 24
                         () => {
                             const a = Math.floor(Math.random() * 15) + 10;
                             const b = Math.floor(Math.random() * 10) + 1;
@@ -424,7 +523,6 @@
                             if (c > 0 && c <= 20) return [a, b, c, d];
                             return null;
                         },
-                        // a - b + c + d = 24
                         () => {
                             const a = Math.floor(Math.random() * 10) + 15;
                             const b = Math.floor(Math.random() * 8) + 1;
