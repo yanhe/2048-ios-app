@@ -2,11 +2,12 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta http-equiv="Content-Security-Policy" content="default-src * 'self' data: blob: 'unsafe-inline' 'unsafe-eval' https: http:;">
     <title>游戏中心 - 2048 & 数独</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Clear+Sans:wght@400;700&display=swap');
@@ -33,16 +34,62 @@
         .note-grid { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); width: 100%; height: 100%; font-size: 10px; color: #757575; }
         .game-card { transition: all 0.2s ease; }
         .game-card:hover { transform: translateY(-4px); box-shadow: 0 12px 30px rgba(0,0,0,0.15); }
+        #error-log { position: fixed; top: 0; left: 0; right: 0; background: #ff4444; color: white; padding: 10px; z-index: 9999; font-size: 12px; max-height: 200px; overflow: auto; display: none; }
     </style>
 </head>
 <body>
+    <div id="error-log"></div>
     <div id="root"></div>
+    <script>
+        // 错误日志显示
+        const errorLog = document.getElementById('error-log');
+        window.onerror = function(msg, url, line, col, error) {
+            errorLog.style.display = 'block';
+            errorLog.innerHTML += `<div><strong>Error:</strong> ${msg} (line ${line})</div>`;
+            return false;
+        };
+        window.addEventListener('unhandledrejection', function(e) {
+            errorLog.style.display = 'block';
+            errorLog.innerHTML += `<div><strong>Promise Error:</strong> ${e.reason}</div>`;
+        });
+
+        // 检查依赖加载
+        if (typeof React === 'undefined') {
+            errorLog.style.display = 'block';
+            errorLog.innerHTML += '<div><strong>React not loaded!</strong></div>';
+        }
+        if (typeof ReactDOM === 'undefined') {
+            errorLog.style.display = 'block';
+            errorLog.innerHTML += '<div><strong>ReactDOM not loaded!</strong></div>';
+        }
+        if (typeof Babel === 'undefined') {
+            errorLog.style.display = 'block';
+            errorLog.innerHTML += '<div><strong>Babel not loaded!</strong></div>';
+        }
+    </script>
     <script type="text/babel">
         const { useState, useEffect, useCallback, useRef, useMemo } = React;
 
         const storage = {
-            get: (key, defaultValue) => { try { const item = localStorage.getItem(key); return item ? JSON.parse(item) : defaultValue; } catch { return defaultValue; } },
-            set: (key, value) => localStorage.setItem(key, JSON.stringify(value))
+            get: (key, defaultValue) => {
+                try {
+                    if (typeof localStorage === 'undefined') return defaultValue;
+                    const item = localStorage.getItem(key);
+                    return item ? JSON.parse(item) : defaultValue;
+                } catch (e) {
+                    console.error('localStorage error:', e);
+                    return defaultValue;
+                }
+            },
+            set: (key, value) => {
+                try {
+                    if (typeof localStorage !== 'undefined') {
+                        localStorage.setItem(key, JSON.stringify(value));
+                    }
+                } catch (e) {
+                    console.error('localStorage error:', e);
+                }
+            }
         };
 
         const formatTime = (seconds) => { const mins = Math.floor(seconds / 60); const secs = seconds % 60; return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`; };
@@ -81,7 +128,7 @@
             </div>
         );
 
-        // ==================== 2048 游戏（保持原样）====================
+        // ==================== 2048 游戏 ====================
         const GRID_SIZE_2048 = 4;
         const TILE_SIZE = 100;
         const GAP = 12;
@@ -99,557 +146,228 @@
             board[r][c] = Math.random() < 0.9 ? 2 : 4;
             return board;
         };
-        const initGame2048 = () => { let board = createEmptyBoard2048(); board = addRandomTile2048(board); board = addRandomTile2048(board); return board; };
-        const rotateLeft2048 = (board) => { const N = board.length; const result = createEmptyBoard2048(); for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) result[N - 1 - c][r] = board[r][c]; return result; };
-        const slideRowLeft2048 = (row) => { let filtered = row.filter(val => val !== 0); for (let i = 0; i < filtered.length - 1; i++) if (filtered[i] === filtered[i + 1]) { filtered[i] *= 2; filtered[i + 1] = 0; } filtered = filtered.filter(val => val !== 0); while (filtered.length < GRID_SIZE_2048) filtered.push(0); return filtered; };
-        const boardsEqual2048 = (a, b) => { for (let r = 0; r < GRID_SIZE_2048; r++) for (let c = 0; c < GRID_SIZE_2048; c++) if (a[r][c] !== b[r][c]) return false; return true; };
-        const moveBoard2048 = (board, direction) => {
-            let newBoard = board.map(row => [...row]);
-            let rotations = { left: 0, up: 1, right: 2, down: 3 };
-            let rot = rotations[direction];
-            for (let i = 0; i < rot; i++) newBoard = rotateLeft2048(newBoard);
-            let scoreGained = 0;
-            for (let r = 0; r < GRID_SIZE_2048; r++) { const oldRow = [...newBoard[r]]; newBoard[r] = slideRowLeft2048(newBoard[r]); for (let c = 0; c < GRID_SIZE_2048; c++) if (oldRow[c] !== 0 && oldRow[c] !== newBoard[r][c] && newBoard[r][c] > oldRow[c]) scoreGained += newBoard[r][c]; }
-            for (let i = 0; i < (4 - rot) % 4; i++) newBoard = rotateLeft2048(newBoard);
-            return { board: newBoard, scoreGained, moved: !boardsEqual2048(board, newBoard) };
-        };
-        const hasValidMoves2048 = (board) => { for (let r = 0; r < GRID_SIZE_2048; r++) for (let c = 0; c < GRID_SIZE_2048; c++) { if (board[r][c] === 0) return true; if (c < GRID_SIZE_2048 - 1 && board[r][c] === board[r][c + 1]) return true; if (r < GRID_SIZE_2048 - 1 && board[r][c] === board[r + 1][c]) return true; } return false; };
-        const hasWon2048 = (board) => { for (let r = 0; r < GRID_SIZE_2048; r++) for (let c = 0; c < GRID_SIZE_2048; c++) if (board[r][c] === 2048) return true; return false; };
-
-        const Tile2048 = ({ value }) => { const { bg, text } = getTileColor(value); return (<div className="w-full h-full rounded-xl flex items-center justify-center font-bold text-6xl tile-new" style={{ backgroundColor: bg, color: text }}>{value !== 0 ? value : ''}</div>); };
-
         const Game2048 = ({ onBack, onUpdateStats }) => {
-            const [board, setBoard] = useState(() => initGame2048());
+            const [board, setBoard] = useState(() => { const b = createEmptyBoard2048(); return addRandomTile2048(addRandomTile2048(b)); });
             const [score, setScore] = useState(0);
-            const [bestScore, setBestScore] = useState(() => storage.get('2048-pad-best-score', 0));
+            const [bestScore, setBestScore] = useState(() => storage.get('2048-best', 0));
             const [gameOver, setGameOver] = useState(false);
             const [won, setWon] = useState(false);
-            const [keepPlaying, setKeepPlaying] = useState(false);
-            const boardRef = useRef(null);
-            const touchStartRef = useRef(null);
+            const touchStart = useRef(null);
 
-            useEffect(() => { if (score > bestScore) { setBestScore(score); storage.set('2048-pad-best-score', score); onUpdateStats('2048', { bestScore: score }); } }, [score, bestScore]);
+            const move = useCallback((direction) => {
+                if (gameOver) return;
+                let newBoard = board.map(row => [...row]);
+                let moved = false, newScore = 0;
+                const slide = (row) => { row = row.filter(val => val); for (let i = 0; i < row.length - 1; i++) if (row[i] === row[i + 1]) { row[i] *= 2; newScore += row[i]; if (row[i] === 2048 && !won) { setWon(true); onUpdateStats('2048', { wins: true }); } row.splice(i + 1, 1); } while (row.length < GRID_SIZE_2048) row.push(0); return row; };
+                if (direction === 'left') { for (let r = 0; r < GRID_SIZE_2048; r++) { const oldRow = [...newBoard[r]]; newBoard[r] = slide(newBoard[r]); if (oldRow.toString() !== newBoard[r].toString()) moved = true; } }
+                else if (direction === 'right') { for (let r = 0; r < GRID_SIZE_2048; r++) { const oldRow = [...newBoard[r]]; newBoard[r] = slide(newBoard[r].reverse()).reverse(); if (oldRow.toString() !== newBoard[r].toString()) moved = true; } }
+                else if (direction === 'up') { for (let c = 0; c < GRID_SIZE_2048; c++) { const col = slide([newBoard[0][c], newBoard[1][c], newBoard[2][c], newBoard[3][c]]); const oldCol = [board[0][c], board[1][c], board[2][c], board[3][c]]; for (let r = 0; r < GRID_SIZE_2048; r++) newBoard[r][c] = col[r]; if (oldCol.toString() !== col.toString()) moved = true; } }
+                else if (direction === 'down') { for (let c = 0; c < GRID_SIZE_2048; c++) { const col = slide([newBoard[3][c], newBoard[2][c], newBoard[1][c], newBoard[0][c]]).reverse(); const oldCol = [board[0][c], board[1][c], board[2][c], board[3][c]]; for (let r = 0; r < GRID_SIZE_2048; r++) newBoard[r][c] = col[r]; if (oldCol.toString() !== col.toString()) moved = true; } }
+                if (moved) {
+                    newBoard = addRandomTile2048(newBoard);
+                    setBoard(newBoard);
+                    const newTotalScore = score + newScore;
+                    setScore(newTotalScore);
+                    if (newTotalScore > bestScore) { setBestScore(newTotalScore); storage.set('2048-best', newTotalScore); }
+                    if (!canMove(newBoard)) { setGameOver(true); onUpdateStats('2048', { bestScore: newTotalScore, gamesPlayed: true }); }
+                }
+            }, [board, score, gameOver, won, bestScore, onUpdateStats]);
 
-            const handleMove = useCallback((direction) => {
-                if (gameOver && !keepPlaying) return;
-                const result = moveBoard2048(board, direction);
-                if (!result.moved) return;
-                const newBoard = addRandomTile2048(result.board);
-                setBoard(newBoard);
-                setScore(prev => prev + result.scoreGained);
-                if (!keepPlaying && hasWon2048(newBoard)) { setWon(true); onUpdateStats('2048', { wins: true }); }
-                if (!hasValidMoves2048(newBoard)) { setGameOver(true); onUpdateStats('2048', { gamesPlayed: true }); }
-            }, [board, gameOver, keepPlaying]);
-
-            const handleNewGame = () => { setBoard(initGame2048()); setScore(0); setGameOver(false); setWon(false); setKeepPlaying(false); onUpdateStats('2048', { gamesPlayed: true }); };
-            const handleTouchStart = (e) => { const touch = e.touches[0]; touchStartRef.current = { x: touch.clientX, y: touch.clientY }; };
-            const handleTouchEnd = (e) => {
-                if (!touchStartRef.current) return;
-                const touch = e.changedTouches[0];
-                const diffX = touch.clientX - touchStartRef.current.x;
-                const diffY = touch.clientY - touchStartRef.current.y;
-                const minSwipeDistance = 30;
-                if (Math.abs(diffX) > Math.abs(diffY)) { if (Math.abs(diffX) > minSwipeDistance) handleMove(diffX > 0 ? 'right' : 'left'); }
-                else { if (Math.abs(diffY) > minSwipeDistance) handleMove(diffY > 0 ? 'down' : 'up'); }
-                touchStartRef.current = null;
-            };
+            const canMove = (b) => { for (let r = 0; r < GRID_SIZE_2048; r++) for (let c = 0; c < GRID_SIZE_2048; c++) if (b[r][c] === 0) return true; for (let r = 0; r < GRID_SIZE_2048; r++) for (let c = 0; c < GRID_SIZE_2048 - 1; c++) if (b[r][c] === b[r][c + 1]) return true; for (let c = 0; c < GRID_SIZE_2048; c++) for (let r = 0; r < GRID_SIZE_2048 - 1; r++) if (b[r][c] === b[r + 1][c]) return true; return false; };
+            const reset = () => { const b = createEmptyBoard2048(); setBoard(addRandomTile2048(addRandomTile2048(b))); setScore(0); setGameOver(false); setWon(false); };
 
             useEffect(() => {
-                const preventScroll = (e) => e.preventDefault();
-                const boardElement = boardRef.current;
-                if (boardElement) boardElement.addEventListener('touchmove', preventScroll, { passive: false });
-                return () => { if (boardElement) boardElement.removeEventListener('touchmove', preventScroll); };
-            }, []);
+                const handleKeyDown = (e) => { if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) { e.preventDefault(); move(e.key.replace('Arrow', '').toLowerCase()); } };
+                window.addEventListener('keydown', handleKeyDown);
+                return () => window.removeEventListener('keydown', handleKeyDown);
+            }, [move]);
 
-            const boardSize = GRID_SIZE_2048 * TILE_SIZE + (GRID_SIZE_2048 + 1) * GAP;
+            const handleTouchStart = (e) => { touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }; };
+            const handleTouchEnd = (e) => {
+                if (!touchStart.current) return;
+                const dx = e.changedTouches[0].clientX - touchStart.current.x;
+                const dy = e.changedTouches[0].clientY - touchStart.current.y;
+                if (Math.abs(dx) > Math.abs(dy)) { if (Math.abs(dx) > 30) move(dx > 0 ? 'right' : 'left'); }
+                else { if (Math.abs(dy) > 30) move(dy > 0 ? 'down' : 'up'); }
+                touchStart.current = null;
+            };
 
             return (
-                <div className="min-h-screen flex flex-col items-center justify-center p-6">
-                    <div className="flex flex-col items-center gap-6">
-                        <div className="flex items-center justify-between w-full px-2">
-                            <button onClick={onBack} className="text-gray-500 hover:text-gray-700 text-lg">← 返回</button>
-                            <h1 className="text-5xl font-bold text-[#776e65]">2048</h1>
-                            <div className="w-10"></div>
-                        </div>
-                        <div className="flex gap-4">
-                            <div className="bg-[#bbada0] rounded-xl p-3 text-center min-w-[90px]"><div className="text-xs text-[#eee4da] font-bold uppercase">得分</div><div className="text-2xl font-bold text-white">{score}</div></div>
-                            <div className="bg-[#bbada0] rounded-xl p-3 text-center min-w-[90px]"><div className="text-xs text-[#eee4da] font-bold uppercase">最高分</div><div className="text-2xl font-bold text-white">{bestScore}</div></div>
-                        </div>
-                        <div className="relative">
-                            <div ref={boardRef} className="game-board-2048 bg-[#bbada0] rounded-2xl p-3" style={{ width: boardSize, height: boardSize }} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-                                <div className="grid grid-cols-4 gap-3 h-full">
-                                    {board.map((row, r) => row.map((value, c) => (<div key={`${r}-${c}`} className="bg-[#cdc1b4] rounded-xl" style={{ width: TILE_SIZE, height: TILE_SIZE }}>{value !== 0 && <Tile2048 value={value} />}</div>)))}
-                                </div>
-                            </div>
-                            {(gameOver || won) && !keepPlaying && (
-                                <div className="absolute inset-0 bg-black/60 rounded-2xl flex flex-col items-center justify-center">
-                                    <div className="text-5xl font-bold text-white mb-6">{won ? '你赢了！' : '游戏结束'}</div>
-                                    <div className="flex gap-4">
-                                        {won && <button onClick={() => setKeepPlaying(true)} className="bg-[#8f7a66] text-white font-bold py-3 px-6 rounded-lg text-xl hover:bg-[#7f6a56]">继续游戏</button>}
-                                        <button onClick={handleNewGame} className="bg-[#8f7a66] text-white font-bold py-3 px-6 rounded-lg text-xl hover:bg-[#7f6a56]">再试一次</button>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                        <button onClick={handleNewGame} className="direction-btn w-full max-w-[200px] py-4 rounded-xl text-white font-bold text-xl">新游戏</button>
-                        <p className="text-[#776e65] text-center text-lg">滑动屏幕移动方块</p>
+                <div className="min-h-screen flex flex-col items-center justify-center p-8">
+                    <div className="flex items-center gap-6 mb-6">
+                        <button onClick={onBack} className="text-2xl font-bold text-gray-600 hover:text-gray-800 transition-colors">← 返回</button>
+                        <h1 className="text-6xl font-bold text-orange-600">2048</h1>
                     </div>
+                    <div className="flex gap-8 mb-6">
+                        <div className="bg-orange-100 rounded-xl px-6 py-3 text-center"><div className="text-sm text-orange-600 font-bold">得分</div><div className="text-3xl font-bold text-orange-800">{score}</div></div>
+                        <div className="bg-orange-100 rounded-xl px-6 py-3 text-center"><div className="text-sm text-orange-600 font-bold">最高分</div><div className="text-3xl font-bold text-orange-800">{bestScore}</div></div>
+                    </div>
+                    <div className="flex gap-4 mb-4">
+                        <button onClick={() => move('up')} className="direction-btn w-16 h-16 rounded-xl text-white text-2xl font-bold">↑</button>
+                    </div>
+                    <div className="flex gap-4 mb-4 items-center">
+                        <button onClick={() => move('left')} className="direction-btn w-16 h-16 rounded-xl text-white text-2xl font-bold">←</button>
+                        <div className="game-board-2048 bg-[#bbada0] rounded-xl p-3" style={{ width: GRID_SIZE_2048 * TILE_SIZE + (GRID_SIZE_2048 + 1) * GAP, height: GRID_SIZE_2048 * TILE_SIZE + (GRID_SIZE_2048 + 1) * GAP }} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+                            {board.map((row, r) => row.map((cell, c) => (
+                                <div key={`${r}-${c}`} style={{ position: 'absolute', width: TILE_SIZE, height: TILE_SIZE, left: 12 + c * (TILE_SIZE + GAP), top: 12 + r * (TILE_SIZE + GAP), backgroundColor: cell ? getTileColor(cell).bg : 'rgba(238, 228, 218, 0.35)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: cell > 512 ? 40 : 50, fontWeight: 'bold', color: getTileColor(cell).text, transition: 'all 0.15s ease' }} className={cell ? 'tile-new' : ''}>{cell || ''}</div>
+                            )))}
+                        </div>
+                        <button onClick={() => move('right')} className="direction-btn w-16 h-16 rounded-xl text-white text-2xl font-bold">→</button>
+                    </div>
+                    <div className="flex gap-4 mb-4">
+                        <button onClick={() => move('down')} className="direction-btn w-16 h-16 rounded-xl text-white text-2xl font-bold">↓</button>
+                    </div>
+                    <button onClick={reset} className="mt-4 bg-orange-600 hover:bg-orange-700 text-white text-xl font-bold py-3 px-8 rounded-xl transition-colors">重新开始</button>
+                    {(gameOver || won) && (
+                        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                            <div className="bg-white rounded-3xl p-10 text-center">
+                                <div className="text-5xl font-bold mb-4">{won ? '🎉 恭喜获胜!' : '😔 游戏结束'}</div>
+                                <div className="text-2xl text-gray-600 mb-6">最终得分: {score}</div>
+                                <button onClick={reset} className="bg-orange-600 hover:bg-orange-700 text-white text-xl font-bold py-3 px-8 rounded-xl">再玩一次</button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // ==================== 数独游戏 ====================
+        const Sudoku = ({ onBack, onUpdateStats }) => {
+            const generateSudoku = () => {
+                const board = Array(9).fill(null).map(() => Array(9).fill(0));
+                const solve = (b) => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (b[r][c] === 0) { for (let n = 1; n <= 9; n++) if (isValid(b, r, c, n)) { b[r][c] = n; if (solve(b)) return true; b[r][c] = 0; } return false; } return true; };
+                const isValid = (b, r, c, n) => { for (let i = 0; i < 9; i++) if (b[r][i] === n || b[i][c] === n) return false; const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3; for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) if (b[br + i][bc + j] === n) return false; return true; };
+                for (let i = 0; i < 9; i += 3) { const nums = [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => Math.random() - 0.5); for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) board[i + r][i + c] = nums[r * 3 + c]; }
+                solve(board);
+                const puzzle = board.map(row => [...row]);
+                let removed = 0;
+                while (removed < 40) { const r = Math.floor(Math.random() * 9), c = Math.floor(Math.random() * 9); if (puzzle[r][c] !== 0) { puzzle[r][c] = 0; removed++; } }
+                return { puzzle, solution: board };
+            };
+
+            const [{ puzzle, solution }, setGame] = useState(() => generateSudoku());
+            const [board, setBoard] = useState(puzzle);
+            const [selected, setSelected] = useState(null);
+            const [fixed, setFixed] = useState(() => puzzle.map((row, r) => row.map((cell, c) => cell !== 0)));
+            const [notes, setNotes] = useState(() => Array(9).fill(null).map(() => Array(9).fill(null).map(() => [])));
+            const [noteMode, setNoteMode] = useState(false);
+            const [timer, setTimer] = useState(0);
+            const [completed, setCompleted] = useState(false);
+
+            useEffect(() => { const interval = setInterval(() => setTimer(t => t + 1), 1000); return () => clearInterval(interval); }, []);
+            useEffect(() => {
+                let solved = true;
+                for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (board[r][c] !== solution[r][c]) { solved = false; break; }
+                if (solved && !completed) { setCompleted(true); onUpdateStats('sudoku', { completed: true, time: timer, gamesPlayed: true }); }
+            }, [board, solution, completed, timer, onUpdateStats]);
+
+            const handleCellClick = (r, c) => setSelected([r, c]);
+            const handleNumberInput = (n) => {
+                if (!selected) return;
+                const [r, c] = selected;
+                if (fixed[r][c]) return;
+                if (noteMode) { setNotes(prev => { const next = prev.map(row => row.map(cell => [...cell])); const idx = next[r][c].indexOf(n); if (idx > -1) next[r][c].splice(idx, 1); else next[r][c].push(n); return next; }); }
+                else { setBoard(prev => { const next = prev.map(row => [...row]); next[r][c] = n; return next; }); setNotes(prev => { const next = prev.map(row => row.map(cell => [...cell])); next[r][c] = []; return next; }); }
+            };
+            const reset = () => { const g = generateSudoku(); setGame(g); setBoard(g.puzzle); setFixed(g.puzzle.map((row, r) => row.map((cell, c) => cell !== 0))); setNotes(Array(9).fill(null).map(() => Array(9).fill(null).map(() => []))); setTimer(0); setCompleted(false); setSelected(null); };
+
+            return (
+                <div className="min-h-screen flex flex-col items-center justify-center p-8">
+                    <div className="flex items-center gap-6 mb-4">
+                        <button onClick={onBack} className="text-2xl font-bold text-gray-600 hover:text-gray-800 transition-colors">← 返回</button>
+                        <h1 className="text-6xl font-bold text-blue-600">数独</h1>
+                        <div className="bg-blue-100 rounded-xl px-6 py-3 text-center"><div className="text-sm text-blue-600 font-bold">时间</div><div className="text-3xl font-bold text-blue-800">{formatTime(timer)}</div></div>
+                    </div>
+                    <div className="bg-white rounded-2xl p-6 shadow-xl">
+                        <div className="grid grid-cols-9 gap-0 border-4 border-blue-800 rounded-lg overflow-hidden">
+                            {board.map((row, r) => row.map((cell, c) => {
+                                const isSelected = selected && selected[0] === r && selected[1] === c;
+                                const isHighlight = selected && (selected[0] === r || selected[1] === c);
+                                const isSameNumber = selected && board[selected[0]][selected[1]] !== 0 && board[selected[0]][selected[1]] === cell;
+                                return (
+                                    <div key={`${r}-${c}`} onClick={() => handleCellClick(r, c)} className={`sudoku-cell w-14 h-14 flex items-center justify-center text-2xl font-bold border border-blue-300 ${fixed[r][c] ? 'fixed text-blue-900 bg-gray-100' : 'text-blue-600'} ${isSelected ? 'selected' : ''} ${isHighlight ? 'highlight' : ''} ${isSameNumber ? 'same-number' : ''} ${(r + 1) % 3 === 0 && r !== 8 ? 'border-b-4 border-b-blue-800' : ''} ${(c + 1) % 3 === 0 && c !== 8 ? 'border-r-4 border-r-blue-800' : ''}`}>
+                                        {cell !== 0 ? cell : notes[r][c].length > 0 ? <div className="note-grid">{[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => <div key={n}>{notes[r][c].includes(n) ? n : ''}</div>)}</div> : ''}
+                                    </div>
+                                );
+                            }))}
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-4 mt-6">
+                        <button onClick={() => setNoteMode(!noteMode)} className={`px-6 py-3 rounded-xl font-bold transition-colors ${noteMode ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>标记模式 {noteMode ? 'ON' : 'OFF'}</button>
+                        <button onClick={reset} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl">重新开始</button>
+                    </div>
+                    <div className="grid grid-cols-5 gap-3 mt-6">
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => <button key={n} onClick={() => handleNumberInput(n)} className="w-16 h-16 bg-blue-100 hover:bg-blue-200 text-blue-800 text-2xl font-bold rounded-xl transition-colors">{n}</button>)}
+                        <button onClick={() => selected && !fixed[selected[0]][selected[1]] && setBoard(prev => { const next = prev.map(row => [...row]); next[selected[0]][selected[1]] = 0; return next; })} className="w-16 h-16 bg-red-100 hover:bg-red-200 text-red-800 text-xl font-bold rounded-xl transition-colors">清除</button>
+                    </div>
+                    {completed && <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"><div className="bg-white rounded-3xl p-10 text-center"><div className="text-5xl font-bold mb-4 text-blue-600">🎉 恭喜完成!</div><div className="text-2xl text-gray-600 mb-6">用时: {formatTime(timer)}</div><button onClick={reset} className="bg-blue-600 hover:bg-blue-700 text-white text-xl font-bold py-3 px-8 rounded-xl">再玩一局</button></div></div>}
                 </div>
             );
         };
 
         // ==================== 24点游戏 ====================
         const Game24Point = ({ onBack, onUpdateStats }) => {
-            const [numbers, setNumbers] = useState([]);
-            const [expression, setExpression] = useState('');
-            const [usedNumbers, setUsedNumbers] = useState([]);
-            const [message, setMessage] = useState('');
-            const [messageType, setMessageType] = useState('');
-            const [history, setHistory] = useState([]);
-            const [problemHistory, setProblemHistory] = useState([]);
-            const [currentIndex, setCurrentIndex] = useState(-1);
-            const [correctCount, setCorrectCount] = useState(0);
-            const [wrongCount, setWrongCount] = useState(0);
-
-            const checkSolvable = (nums) => {
-                const ops = ['+', '-'];
-                const permutations = (arr) => {
-                    if (arr.length <= 1) return [arr];
-                    const result = [];
-                    for (let i = 0; i < arr.length; i++) {
-                        const rest = [...arr.slice(0, i), ...arr.slice(i + 1)];
-                        for (const perm of permutations(rest)) {
-                            result.push([arr[i], ...perm]);
-                        }
-                    }
-                    return result;
-                };
-                const perms = permutations(nums);
-                for (const p of perms) {
-                    const [a, b, c, d] = p;
-                    for (const op1 of ops) {
-                        for (const op2 of ops) {
-                            for (const op3 of ops) {
-                                const exprs = [
-                                    `(( ${a} ${op1} ${b} ) ${op2} ${c}) ${op3} ${d}`,
-                                    `( ${a} ${op1} ( ${b} ${op2} ${c} )) ${op3} ${d}`,
-                                    `( ${a} ${op1} ${b} ) ${op2} ( ${c} ${op3} ${d} )`,
-                                    `${a} ${op1} (( ${b} ${op2} ${c} ) ${op3} ${d})`,
-                                    `${a} ${op1} ( ${b} ${op2} ( ${c} ${op3} ${d} ))`
-                                ];
-                                for (const expr of exprs) {
-                                    try {
-                                        const result = Function('"use strict"; return (' + expr + ')')();
-                                        if (Math.abs(result - 24) < 0.0001) return true;
-                                    } catch (e) {}
-                                }
-                            }
-                        }
-                    }
-                }
-                return false;
-            };
-
             const generateNumbers = () => {
-                let nums;
-                let attempts = 0;
-                do {
-                    nums = Array(4).fill(0).map(() => Math.floor(Math.random() * 13) + 1);
-                    attempts++;
-                } while (!checkSolvable(nums) && attempts < 100);
-                const newProblem = { numbers: nums, solved: false };
-                const newProblemHistory = [...problemHistory, newProblem];
-                setProblemHistory(newProblemHistory);
-                setCurrentIndex(newProblemHistory.length - 1);
-                setNumbers(nums);
-                setExpression('');
-                setUsedNumbers([]);
-                setMessage('');
-                setMessageType('');
+                while (true) { const nums = [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => Math.random() - 0.5).slice(0, 4); if (canSolve24(nums)) return nums; }
             };
+            const canSolve24 = (nums) => { const ops = ['+', '-', '*', '/']; const permute = (arr) => { if (arr.length <= 1) return [arr]; const res = []; for (let i = 0; i < arr.length; i++) { const rest = [...arr.slice(0, i), ...arr.slice(i + 1)]; for (const p of permute(rest)) res.push([arr[i], ...p]); } return res; }; const calc = (a, b, op) => { if (op === '+') return a + b; if (op === '-') return a - b; if (op === '*') return a * b; if (op === '/') return b !== 0 ? a / b : null; }; for (const p of permute(nums)) for (const o1 of ops) for (const o2 of ops) for (const o3 of ops) { let r1 = calc(calc(calc(p[0], p[1], o1), p[2], o2), p[3], o3); if (Math.abs(r1 - 24) < 0.0001) return true; } return false; };
 
-            const goToProblem = (index) => {
-                if (index < 0 || index >= problemHistory.length) return;
-                setCurrentIndex(index);
-                setNumbers(problemHistory[index].numbers);
-                setExpression('');
-                setUsedNumbers([]);
-                setMessage('');
-                setMessageType('');
+            const [numbers, setNumbers] = useState(() => generateNumbers());
+            const [expression, setExpression] = useState('');
+            const [result, setResult] = useState(null);
+            const [usedIndices, setUsedIndices] = useState([]);
+            const [completed, setCompleted] = useState(0);
+
+            const handleNumberClick = (num, idx) => {
+                if (usedIndices.includes(idx)) return;
+                setExpression(prev => prev + num);
+                setUsedIndices(prev => [...prev, idx]);
             };
-
-            useEffect(() => { generateNumbers(); }, []);
-
-            const addToExpression = (value, type) => {
-                if (type === 'number') {
-                    const numIndex = numbers.findIndex((n, i) => n === value && !usedNumbers.includes(i));
-                    if (numIndex === -1) return;
-                    setUsedNumbers([...usedNumbers, numIndex]);
-                }
-                setExpression(expression + value);
-                setMessage('');
+            const handleOperatorClick = (op) => setExpression(prev => prev + ' ' + op + ' ');
+            const handleClear = () => { setExpression(''); setUsedIndices([]); setResult(null); };
+            const handleBackspace = () => {
+                const parts = expression.trim().split(' ');
+                if (parts.length === 0) return;
+                const last = parts[parts.length - 1];
+                if (!isNaN(last)) { const idx = usedIndices[usedIndices.length - 1]; setUsedIndices(prev => prev.slice(0, -1)); }
+                setExpression(prev => parts.slice(0, -1).join(' '));
             };
-
-            const addOperator = (op) => {
-                setExpression(expression + ' ' + op + ' ');
-                setMessage('');
-            };
-
-            const addParenthesis = (p) => {
-                setExpression(expression + p);
-                setMessage('');
-            };
-
-            const clearExpression = () => {
-                setExpression('');
-                setUsedNumbers([]);
-                setMessage('');
-                setMessageType('');
-            };
-
-            const backspace = () => {
-                const trimmed = expression.trimEnd();
-                const lastChar = trimmed[trimmed.length - 1];
-                const numMatch = numbers.find((n, i) => String(n) === lastChar && usedNumbers.includes(i));
-                if (numMatch !== undefined) {
-                    const numIndex = usedNumbers[usedNumbers.length - 1];
-                    setUsedNumbers(usedNumbers.filter(i => i !== numIndex));
-                }
-                setExpression(trimmed.slice(0, -1).trimEnd());
-                setMessage('');
-            };
-
             const checkAnswer = () => {
-                onUpdateStats('24point', { attempt: true });
                 try {
-                    if (usedNumbers.length !== 4) {
-                        setMessage('请使用所有4个数字');
-                        setMessageType('error');
-                        return;
-                    }
-                    const result = Function('"use strict"; return (' + expression + ')')();
-                    if (Math.abs(result - 24) < 0.0001) {
-                        setMessage('正确！' + expression + ' = 24');
-                        setMessageType('success');
+                    const val = eval(expression);
+                    if (Math.abs(val - 24) < 0.0001) {
+                        setResult({ success: true, message: '正确! 等于 24' });
+                        setCompleted(c => c + 1);
                         onUpdateStats('24point', { completed: true });
-                        setHistory([{ numbers, expression, correct: true }, ...history].slice(0, 10));
-                        setCorrectCount(c => c + 1);
-                    } else {
-                        setMessage('结果是 ' + result + '，不是24');
-                        setMessageType('error');
-                        setWrongCount(w => w + 1);
-                    }
-                } catch (e) {
-                    setMessage('表达式格式错误');
-                    setMessageType('error');
-                    setWrongCount(w => w + 1);
-                }
+                        setTimeout(() => { setNumbers(generateNumbers()); setExpression(''); setUsedIndices([]); setResult(null); }, 1500);
+                    } else { setResult({ success: false, message: `等于 ${val.toFixed(2)}, 不是 24` }); onUpdateStats('24point', { attempt: true }); }
+                } catch { setResult({ success: false, message: '表达式无效' }); }
             };
-
-            const nextProblem = () => {
-                if (messageType === 'success') {
-                    setHistory([{ numbers, expression, correct: true }, ...history].slice(0, 10));
-                }
-                generateNumbers();
-            };
+            const newProblem = () => { setNumbers(generateNumbers()); setExpression(''); setUsedIndices([]); setResult(null); };
 
             return (
-                <div className="min-h-screen flex flex-col items-center justify-center p-6">
-                    <button onClick={onBack} className="absolute top-6 left-6 p-3 rounded-full hover:bg-gray-200">
-                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-                    </button>
-                    <h1 className="text-5xl font-bold text-green-600 mb-2">24点挑战</h1>
-                    <p className="text-gray-500 mb-2 text-xl">用加减法和括号，把4个数字算出24</p>
-                    {problemHistory.length > 0 && (
-                        <p className="text-lg text-gray-400 mb-2">题目 {currentIndex + 1} / {problemHistory.length}</p>
-                    )}
+                <div className="min-h-screen flex flex-col items-center justify-center p-8">
+                    <div className="flex items-center gap-6 mb-6">
+                        <button onClick={onBack} className="text-2xl font-bold text-gray-600 hover:text-gray-800 transition-colors">← 返回</button>
+                        <h1 className="text-6xl font-bold text-green-600">24点</h1>
+                        <div className="bg-green-100 rounded-xl px-6 py-3 text-center"><div className="text-sm text-green-600 font-bold">已完成</div><div className="text-3xl font-bold text-green-800">{completed}</div></div>
+                    </div>
+                    <p className="text-gray-600 mb-6 text-xl">使用 + - * / 让四个数字等于 24</p>
                     <div className="flex gap-6 mb-6">
-                        <span className="text-green-600 font-medium text-xl">✓ 对 {correctCount}</span>
-                        <span className="text-red-500 font-medium text-xl">✗ 错 {wrongCount}</span>
+                        {numbers.map((n, i) => <button key={i} onClick={() => handleNumberClick(n, i)} disabled={usedIndices.includes(i)} className={`w-24 h-24 text-4xl font-bold rounded-2xl transition-all ${usedIndices.includes(i) ? 'bg-gray-200 text-gray-400' : 'bg-green-100 hover:bg-green-200 text-green-800 shadow-lg'}`}>{n}</button>)}
                     </div>
-
-                    <div className="bg-white rounded-3xl p-10 shadow-lg border border-gray-200 w-full max-w-2xl">
-                        <div className="flex justify-center gap-6 mb-10">
-                            {numbers.map((num, i) => (
-                                <button
-                                    key={i}
-                                    onClick={() => !usedNumbers.includes(i) && addToExpression(num, 'number')}
-                                    disabled={usedNumbers.includes(i)}
-                                    className={`w-24 h-24 rounded-2xl text-5xl font-bold transition ${usedNumbers.includes(i) ? 'bg-gray-200 text-gray-400' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}
-                                >
-                                    {num}
-                                </button>
-                            ))}
-                        </div>
-
-                        <div className="bg-gray-50 rounded-2xl p-6 mb-6 min-h-[80px] flex items-center justify-center">
-                            <span className="text-3xl font-mono">{expression || '点击数字和运算符'}</span>
-                        </div>
-
-                        {message && (
-                            <div className={`rounded-2xl p-4 mb-6 text-center text-xl font-medium ${messageType === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                {message}
-                            </div>
-                        )}
-
-                        <div className="flex justify-center gap-4 mb-6">
-                            <button onClick={() => addOperator('+')} className="w-20 h-20 rounded-xl bg-blue-100 text-blue-700 text-4xl font-bold hover:bg-blue-200">+</button>
-                            <button onClick={() => addOperator('-')} className="w-20 h-20 rounded-xl bg-blue-100 text-blue-700 text-4xl font-bold hover:bg-blue-200">-</button>
-                            <button onClick={() => addParenthesis('(')} className="w-20 h-20 rounded-xl bg-purple-100 text-purple-700 text-3xl font-bold hover:bg-purple-200">(</button>
-                            <button onClick={() => addParenthesis(')')} className="w-20 h-20 rounded-xl bg-purple-100 text-purple-700 text-3xl font-bold hover:bg-purple-200">)</button>
-                        </div>
-
-                        <div className="flex justify-center gap-4 mb-8">
-                            <button onClick={clearExpression} className="px-6 py-3 rounded-xl bg-gray-200 text-gray-700 text-xl font-bold hover:bg-gray-300">清空</button>
-                            <button onClick={backspace} className="px-6 py-3 rounded-xl bg-gray-200 text-gray-700 text-xl font-bold hover:bg-gray-300">退格</button>
-                            <button onClick={checkAnswer} className="px-8 py-3 rounded-xl bg-green-600 text-white text-xl font-bold hover:bg-green-700">验证</button>
-                        </div>
-
-                        <div className="flex justify-center gap-4">
-                            <button onClick={() => goToProblem(currentIndex - 1)} disabled={currentIndex <= 0} className="px-8 py-3 rounded-xl bg-gray-500 text-white text-xl font-bold hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed">上一题</button>
-                            <button onClick={nextProblem} className="px-8 py-3 rounded-xl bg-blue-600 text-white text-xl font-bold hover:bg-blue-700">下一题</button>
-                        </div>
+                    <div className="bg-white rounded-xl p-4 min-w-[300px] text-center mb-4">
+                        <div className="text-2xl font-mono text-gray-800 min-h-[40px]">{expression || '点击数字和运算符'}</div>
                     </div>
-
-                    {history.length > 0 && (
-                        <div className="mt-8 w-full max-w-2xl">
-                            <h3 className="text-xl font-bold text-gray-700 mb-4">最近完成</h3>
-                            <div className="space-y-3">
-                                {history.map((h, i) => (
-                                    <div key={i} className="bg-white rounded-xl p-4 border border-gray-200 flex justify-between text-lg">
-                                        <span className="text-gray-600">{h.numbers.join(', ')}</span>
-                                        <span className="font-mono text-green-600">{h.expression} = 24</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-                </div>
-            );
-        };
-
-        // ==================== 数独游戏（新版）====================
-        const SUDOKU_SIZE = 9;
-        const BOX_SIZE = 3;
-
-        const isValidPlacement = (board, row, col, num) => {
-            for (let x = 0; x < SUDOKU_SIZE; x++) if (board[row][x] === num) return false;
-            for (let x = 0; x < SUDOKU_SIZE; x++) if (board[x][col] === num) return false;
-            const startRow = row - row % BOX_SIZE, startCol = col - col % BOX_SIZE;
-            for (let i = 0; i < BOX_SIZE; i++) for (let j = 0; j < BOX_SIZE; j++) if (board[i + startRow][j + startCol] === num) return false;
-            return true;
-        };
-
-        const solveBoard = (board) => {
-            for (let row = 0; row < SUDOKU_SIZE; row++) {
-                for (let col = 0; col < SUDOKU_SIZE; col++) {
-                    if (board[row][col] === 0) {
-                        for (let num = 1; num <= 9; num++) {
-                            if (isValidPlacement(board, row, col, num)) {
-                                board[row][col] = num;
-                                if (solveBoard(board)) return true;
-                                board[row][col] = 0;
-                            }
-                        }
-                        return false;
-                    }
-                }
-            }
-            return true;
-        };
-
-        const generateSudoku = (difficulty) => {
-            const board = Array(SUDOKU_SIZE).fill(null).map(() => Array(SUDOKU_SIZE).fill(0));
-            for (let i = 0; i < SUDOKU_SIZE; i += BOX_SIZE) {
-                const nums = [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => Math.random() - 0.5);
-                let idx = 0;
-                for (let row = i; row < i + BOX_SIZE; row++) for (let col = i; col < i + BOX_SIZE; col++) board[row][col] = nums[idx++];
-            }
-            solveBoard(board);
-            const solution = board.map(row => [...row]);
-            const cellsToKeep = { easy: 46, medium: 36, hard: 26 }[difficulty] || 36;
-            const positions = [];
-            for (let i = 0; i < SUDOKU_SIZE; i++) for (let j = 0; j < SUDOKU_SIZE; j++) positions.push([i, j]);
-            positions.sort(() => Math.random() - 0.5);
-            const puzzle = board.map(row => [...row]);
-            for (let i = 0; i < 81 - cellsToKeep; i++) { const [row, col] = positions[i]; puzzle[row][col] = 0; }
-            return { puzzle, solution };
-        };
-
-        const Sudoku = ({ onBack, onUpdateStats }) => {
-            const [difficulty, setDifficulty] = useState('medium');
-            const [puzzle, setPuzzle] = useState(null);
-            const [solution, setSolution] = useState(null);
-            const [userBoard, setUserBoard] = useState(null);
-            const [selectedCell, setSelectedCell] = useState(null);
-            const [notes, setNotes] = useState({});
-            const [noteMode, setNoteMode] = useState(false);
-            const [history, setHistory] = useState([]);
-            const [timer, setTimer] = useState(0);
-            const [isRunning, setIsRunning] = useState(false);
-            const [completed, setCompleted] = useState(false);
-            const [showSelect, setShowSelect] = useState(true);
-
-            const difficultyNames = { easy: '简单', medium: '中等', hard: '困难' };
-
-            const startGame = (diff) => {
-                setDifficulty(diff);
-                const { puzzle: newPuzzle, solution: newSolution } = generateSudoku(diff);
-                setPuzzle(newPuzzle);
-                setSolution(newSolution);
-                setUserBoard(newPuzzle.map(row => [...row]));
-                setNotes({});
-                setHistory([]);
-                setTimer(0);
-                setIsRunning(true);
-                setCompleted(false);
-                setShowSelect(false);
-                setSelectedCell(null);
-                setNoteMode(false);
-                onUpdateStats('sudoku', { gamesPlayed: true });
-            };
-
-            useEffect(() => { let interval; if (isRunning && !completed) interval = setInterval(() => setTimer(t => t + 1), 1000); return () => clearInterval(interval); }, [isRunning, completed]);
-            useEffect(() => { if (!userBoard || !solution) return; if (userBoard.every((row, r) => row.every((val, c) => val === solution[r][c]))) { setCompleted(true); setIsRunning(false); onUpdateStats('sudoku', { completed: true, time: timer }); } }, [userBoard, solution, timer]);
-
-            const remainingCounts = useMemo(() => {
-                if (!userBoard) return {};
-                const counts = {};
-                for (let num = 1; num <= 9; num++) { let filled = 0; for (let r = 0; r < SUDOKU_SIZE; r++) for (let c = 0; c < SUDOKU_SIZE; c++) if (userBoard[r][c] === num) filled++; counts[num] = 9 - filled; }
-                return counts;
-            }, [userBoard]);
-
-            const handleCellClick = (r, c) => { if (!completed && puzzle[r][c] === 0) setSelectedCell([r, c]); };
-
-            const handleNumber = (num) => {
-                if (!selectedCell || completed) return;
-                const [r, c] = selectedCell;
-                if (puzzle[r][c] !== 0) return;
-                setHistory(prev => [...prev, { board: userBoard.map(row => [...row]), notes: { ...notes } }]);
-                if (noteMode) {
-                    const key = `${r}-${c}`;
-                    const cellNotes = notes[key] || [];
-                    setNotes({ ...notes, [key]: cellNotes.includes(num) ? cellNotes.filter(n => n !== num) : [...cellNotes, num].sort() });
-                } else {
-                    const newBoard = userBoard.map(row => [...row]);
-                    newBoard[r][c] = num;
-                    setUserBoard(newBoard);
-                    const key = `${r}-${c}`;
-                    if (notes[key]) { const newNotes = { ...notes }; delete newNotes[key]; setNotes(newNotes); }
-                }
-            };
-
-            const handleErase = () => {
-                if (!selectedCell || completed) return;
-                const [r, c] = selectedCell;
-                if (puzzle[r][c] !== 0) return;
-                setHistory(prev => [...prev, { board: userBoard.map(row => [...row]), notes: { ...notes } }]);
-                const newBoard = userBoard.map(row => [...row]);
-                newBoard[r][c] = 0;
-                setUserBoard(newBoard);
-                const key = `${r}-${c}`;
-                if (notes[key]) { const newNotes = { ...notes }; delete newNotes[key]; setNotes(newNotes); }
-            };
-
-            const handleUndo = () => {
-                if (history.length === 0 || completed) return;
-                const last = history[history.length - 1];
-                setUserBoard(last.board);
-                setNotes(last.notes);
-                setHistory(prev => prev.slice(0, -1));
-            };
-
-            const handleHint = () => {
-                if (!selectedCell || completed) return;
-                const [r, c] = selectedCell;
-                if (puzzle[r][c] !== 0) return;
-                setHistory(prev => [...prev, { board: userBoard.map(row => [...row]), notes: { ...notes } }]);
-                const newBoard = userBoard.map(row => [...row]);
-                newBoard[r][c] = solution[r][c];
-                setUserBoard(newBoard);
-            };
-
-            const getCellClass = (r, c) => {
-                let cls = 'sudoku-cell';
-                if (!selectedCell) return cls;
-                const [sr, sc] = selectedCell;
-                if (r === sr && c === sc) cls += ' selected';
-                else if (r === sr || c === sc) cls += ' highlight';
-                else { const sBoxR = Math.floor(sr / 3), sBoxC = Math.floor(sc / 3), boxR = Math.floor(r / 3), boxC = Math.floor(c / 3); if (sBoxR === boxR && sBoxC === boxC) cls += ' highlight'; }
-                if (userBoard[sr][sc] !== 0 && userBoard[r][c] === userBoard[sr][sc]) cls += ' same-number';
-                return cls;
-            };
-
-            if (showSelect) {
-                return (
-                    <div className="min-h-screen flex flex-col items-center justify-center p-8">
-                        <button onClick={onBack} className="absolute top-6 left-6 p-3 rounded-full hover:bg-gray-200"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg></button>
-                        <h1 className="text-6xl font-bold text-gray-800 mb-8">数独</h1>
-                        <p className="text-gray-500 mb-10 text-xl">选择难度开始游戏</p>
-                        <div className="flex gap-6">
-                            <button onClick={() => startGame('easy')} className="bg-green-500 text-white font-bold py-5 px-10 rounded-2xl text-2xl hover:bg-green-600 transition shadow-lg">简单</button>
-                            <button onClick={() => startGame('medium')} className="bg-yellow-500 text-white font-bold py-5 px-10 rounded-2xl text-2xl hover:bg-yellow-600 transition shadow-lg">中等</button>
-                            <button onClick={() => startGame('hard')} className="bg-red-500 text-white font-bold py-5 px-10 rounded-2xl text-2xl hover:bg-red-600 transition shadow-lg">困难</button>
-                        </div>
+                    {result && <div className={`text-xl font-bold mb-4 ${result.success ? 'text-green-600' : 'text-red-600'}`}>{result.message}</div>}
+                    <div className="grid grid-cols-4 gap-3 mb-4">
+                        {['+', '-', '*', '/'].map(op => <button key={op} onClick={() => handleOperatorClick(op)} className="w-16 h-16 bg-green-600 hover:bg-green-700 text-white text-2xl font-bold rounded-xl">{op}</button>)}
                     </div>
-                );
-            }
-
-            return (
-                <div className="min-h-screen flex flex-col p-6">
-                    <div className="flex items-center justify-between mb-4">
-                        <button onClick={() => setShowSelect(true)} className="p-3 rounded-full hover:bg-gray-200"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg></button>
-                        <div className="flex gap-3">
-                            <button className="p-3 rounded-full hover:bg-gray-200"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg></button>
-                            <button className="p-3 rounded-full hover:bg-gray-200"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button>
-                            <button className="p-3 rounded-full hover:bg-gray-200"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
-                        </div>
-                    </div>
-                    <div className="flex justify-between items-center mb-4 px-4">
-                        <div className="text-center"><div className="text-sm text-gray-500 uppercase tracking-wider">难度</div><div className="text-xl font-bold text-blue-600">{difficultyNames[difficulty]}</div></div>
-                        <div className="text-center"><div className="text-sm text-gray-500 uppercase tracking-wider">时间</div><div className="text-xl font-bold text-blue-600">{formatTime(timer)}</div></div>
-                    </div>
-                    <div className="flex-1 flex items-center justify-center mb-4">
-                        <div className="relative">
-                            <div className="bg-white border-2 border-gray-700 p-1 rounded-lg shadow-lg">
-                                <div className="grid grid-cols-9">
-                                    {userBoard && userBoard.map((row, r) => row.map((val, c) => {
-                                        const cellNotes = notes[`${r}-${c}`] || [];
-                                        const isFixed = puzzle[r][c] !== 0;
-                                        return (
-                                            <div key={`${r}-${c}`} onClick={() => handleCellClick(r, c)} className={getCellClass(r, c)}
-                                                style={{ width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', fontWeight: isFixed ? '600' : '500', color: isFixed ? '#263238' : '#1976d2', borderRight: (c + 1) % 3 === 0 && c !== 8 ? '2px solid #37474f' : '1px solid #e0e0e0', borderBottom: (r + 1) % 3 === 0 && r !== 8 ? '2px solid #37474f' : '1px solid #e0e0e0' }}>
-                                                {val !== 0 ? val : cellNotes.length > 0 ? <div className="note-grid">{[1,2,3,4,5,6,7,8,9].map(n => <span key={n}>{cellNotes.includes(n) ? n : ''}</span>)}</div> : null}
-                                            </div>
-                                        );
-                                    }))}
-                                </div>
-                            </div>
-                            {completed && (
-                                <div className="absolute inset-0 bg-black/60 rounded-lg flex flex-col items-center justify-center">
-                                    <div className="text-5xl font-bold text-white mb-4">恭喜完成！</div>
-                                    <div className="text-2xl text-white mb-6">用时: {formatTime(timer)}</div>
-                                    <button onClick={() => setShowSelect(true)} className="bg-blue-600 text-white font-bold py-4 px-10 rounded-xl text-xl hover:bg-blue-700">再玩一局</button>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                    <div className="flex justify-center gap-8 mb-4">
-                        <button onClick={handleUndo} className="flex flex-col items-center p-3 rounded-xl hover:bg-gray-200"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#546e7a" strokeWidth="1.5"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg><span className="text-sm text-gray-600 mt-1">撤销</span></button>
-                        <button onClick={handleErase} className="flex flex-col items-center p-3 rounded-xl hover:bg-gray-200"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#546e7a" strokeWidth="1.5"><path d="M20 20H7L3 16C2 15 2 13 3 12L13 2L22 11L20 20Z"/><path d="M17 17L7 7"/></svg><span className="text-sm text-gray-600 mt-1">擦除</span></button>
-                        <button onClick={() => setNoteMode(!noteMode)} className={`flex flex-col items-center p-3 rounded-xl ${noteMode ? 'bg-blue-100' : 'hover:bg-gray-200'}`}><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={noteMode ? "#1976d2" : "#546e7a"} strokeWidth="1.5"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg><span className={`text-sm mt-1 ${noteMode ? 'text-blue-600' : 'text-gray-600'}`}>笔记</span></button>
-                        <button onClick={handleHint} className="flex flex-col items-center p-3 rounded-xl hover:bg-gray-200 relative"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#546e7a" strokeWidth="1.5"><path d="M9.663 17h4.673M12 3v1M6.343 4.343l-.707-.707M18.364 4.343l.707-.707M4 12h1M20 12h1M12 21v-7a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v7h7z"/><circle cx="12" cy="9" r="2"/></svg><span className="text-sm text-gray-600 mt-1">提示</span><div className="absolute top-2 right-2 w-5 h-5 bg-blue-600 text-white text-xs rounded-full flex items-center justify-center">1</div></button>
-                    </div>
-                    <div className="flex justify-center gap-3">
-                        {[1,2,3,4,5,6,7,8,9].map(num => {
-                            const count = remainingCounts[num] || 0;
-                            return (
-                                <button key={num} onClick={() => count > 0 && handleNumber(num)} disabled={count === 0} className="bg-white border border-gray-300 rounded-2xl shadow-md flex flex-col items-center justify-center" style={{ width: '60px', height: '70px', opacity: count === 0 ? 0.4 : 1 }}>
-                                    <span className="text-3xl font-semibold text-blue-600">{num}</span>
-                                    <span className="text-sm text-gray-400">{count}</span>
-                                </button>
-                            );
-                        })}
+                    <div className="flex gap-4">
+                        <button onClick={handleClear} className="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-6 rounded-xl">清除</button>
+                        <button onClick={handleBackspace} className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 px-6 rounded-xl">退格</button>
+                        <button onClick={checkAnswer} className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-xl">检查</button>
+                        <button onClick={newProblem} className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-6 rounded-xl">下一题</button>
                     </div>
                 </div>
             );
@@ -692,7 +410,8 @@
             return <GameSelector onSelectGame={setCurrentGame} stats={stats} />;
         };
 
-        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
     </script>
 </body>
 </html>
