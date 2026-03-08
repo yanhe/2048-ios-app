@@ -24,6 +24,8 @@
         .sudoku-cell:hover:not(.fixed-cell) { background: #f5f5f5; }
         .sudoku-cell.selected { background: #1976d2 !important; color: white !important; }
         .sudoku-cell.same-number { background: #bbdefb; }
+        .sudoku-cell.row-highlight, .sudoku-cell.col-highlight { background: #e3f2fd; }
+        .sudoku-cell.error { color: #d32f2f !important; }
         .sudoku-cell.fixed-cell { color: #1a237e; background: #e8eaf6; font-weight: bold; }
         .note-grid { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); width: 100%; height: 100%; font-size: 10px; color: #757575; }
         .game-card { transition: all 0.2s ease; }
@@ -33,13 +35,11 @@
         /* 数独宫格边框样式 */
         .sudoku-grid { display: grid; grid-template-columns: repeat(9, 1fr); border: 3px solid #1e40af; }
         .sudoku-cell { border: 1px solid #93c5fd; width: 50px; height: 50px; font-size: 24px; }
-        /* 每3列后的右边框加粗 */
-        .sudoku-cell:nth-child(3n) { border-right: 3px solid #1e40af; }
-        /* 最后一列不需要右边框 */
-        .sudoku-cell:nth-child(9n) { border-right: none; }
-        /* 每3行后的下边框加粗 */
-        .sudoku-cell:nth-child(n+19):nth-child(-n+27),
-        .sudoku-cell:nth-child(n+46):nth-child(-n+54) { border-bottom: 3px solid #1e40af; }
+        /* 横屏布局 */
+        @media (orientation: landscape) and (min-width: 768px) {
+            .sudoku-landscape { flex-direction: row !important; gap: 40px; }
+            .sudoku-landscape .sudoku-controls { flex-direction: column; }
+        }
     </style>
 </head>
 <body>
@@ -188,7 +188,6 @@
             const [gameOver, setGameOver] = useState(false);
             const [won, setWon] = useState(false);
             const touchStart = useRef(null);
-            const prevBoardRef = useRef(null);
 
             const move = useCallback((direction) => {
                 if (gameOver) return;
@@ -243,7 +242,6 @@
                     setBoard(newBoard);
                     const newTotalScore = score + newScore;
                     setScore(newTotalScore);
-                    // 播放音效
                     if (merged) playMergeSound();
                     else playMoveSound();
                     if (newTotalScore > bestScore) { setBestScore(newTotalScore); storage.set('2048-best', newTotalScore); }
@@ -305,11 +303,10 @@
         };
 
         // ==================== 数独游戏 ====================
-        // 参考标准数独设计：简易约35-40个提示，中等约45-50个提示，困难约55-60个提示
         const DIFFICULTY_SETTINGS = {
-            easy: { emptyCount: 40, name: '简易', hints: 41 },      // 81-40=41个预填
-            medium: { emptyCount: 50, name: '中等', hints: 31 },    // 81-50=31个预填
-            hard: { emptyCount: 60, name: '困难', hints: 21 }       // 81-60=21个预填
+            easy: { emptyCount: 40, name: '简易', hints: 41 },
+            medium: { emptyCount: 50, name: '中等', hints: 31 },
+            hard: { emptyCount: 60, name: '困难', hints: 21 }
         };
 
         const Sudoku = ({ onBack, onUpdateStats }) => {
@@ -323,6 +320,22 @@
             const [noteMode, setNoteMode] = useState(false);
             const [timer, setTimer] = useState(0);
             const [completed, setCompleted] = useState(false);
+            const [errors, setErrors] = useState([]);
+            const [isLandscape, setIsLandscape] = useState(false);
+
+            // 检测屏幕方向
+            useEffect(() => {
+                const checkOrientation = () => {
+                    setIsLandscape(window.innerWidth > window.innerHeight && window.innerWidth >= 768);
+                };
+                checkOrientation();
+                window.addEventListener('resize', checkOrientation);
+                window.addEventListener('orientationchange', checkOrientation);
+                return () => {
+                    window.removeEventListener('resize', checkOrientation);
+                    window.removeEventListener('orientationchange', checkOrientation);
+                };
+            }, []);
 
             const generateCompleteBoard = () => {
                 const board = Array(9).fill(null).map(() => Array(9).fill(0));
@@ -345,22 +358,17 @@
             };
 
             const generateSudoku = (diff) => {
-                // 生成完整解
                 const fullSolution = generateCompleteBoard();
                 const puzzle = fullSolution.map(row => [...row]);
                 const emptyCount = DIFFICULTY_SETTINGS[diff].emptyCount;
-
-                // 随机挖空
                 let removed = 0;
                 const positions = [];
                 for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) positions.push([r, c]);
                 positions.sort(() => Math.random() - 0.5);
-
                 for (const [r, c] of positions) {
                     if (removed >= emptyCount) break;
                     if (puzzle[r][c] !== 0) { puzzle[r][c] = 0; removed++; }
                 }
-
                 return { puzzle, solution: fullSolution };
             };
 
@@ -374,6 +382,7 @@
                 setTimer(0);
                 setCompleted(false);
                 setSelected(null);
+                setErrors([]);
                 setGameState('playing');
             };
 
@@ -387,6 +396,7 @@
                 setTimer(0);
                 setCompleted(false);
                 setSelected(null);
+                setErrors([]);
             };
 
             useEffect(() => {
@@ -402,26 +412,93 @@
                 if (solved && !completed) { setCompleted(true); onUpdateStats('sudoku', { completed: true, time: timer, gamesPlayed: true }); }
             }, [board, solution, completed, timer, onUpdateStats, gameState]);
 
-            const handleCellClick = (r, c) => setSelected([r, c]);
+            // 检查错误
+            const checkErrors = useCallback(() => {
+                if (!board || !solution) return;
+                const newErrors = [];
+                for (let r = 0; r < 9; r++) {
+                    for (let c = 0; c < 9; c++) {
+                        if (board[r][c] !== 0 && board[r][c] !== solution[r][c]) {
+                            newErrors.push(`${r}-${c}`);
+                        }
+                    }
+                }
+                setErrors(newErrors);
+            }, [board, solution]);
+
+            const handleCellClick = (r, c) => {
+                // 切换格子前检查当前格子的错误
+                if (selected && board[selected[0]][selected[1]] !== 0 && !fixed[selected[0]][selected[1]]) {
+                    const [sr, sc] = selected;
+                    if (board[sr][sc] !== solution[sr][sc]) {
+                        // 当前格子填错了，显示错误
+                        setErrors(prev => [...new Set([...prev, `${sr}-${sc}`])]);
+                    } else {
+                        // 填对了，从错误列表移除
+                        setErrors(prev => prev.filter(e => e !== `${sr}-${sc}`));
+                    }
+                }
+                setSelected([r, c]);
+            };
+
             const handleNumberInput = (n) => {
                 if (!selected || !board) return;
                 const [r, c] = selected;
                 if (fixed[r][c]) return;
-                if (noteMode) { setNotes(prev => { const next = prev.map(row => row.map(cell => [...cell])); const idx = next[r][c].indexOf(n); if (idx > -1) next[r][c].splice(idx, 1); else next[r][c].push(n); return next; }); }
-                else { setBoard(prev => { const next = prev.map(row => [...row]); next[r][c] = n; return next; }); setNotes(prev => { const next = prev.map(row => row.map(cell => [...cell])); next[r][c] = []; return next; }); }
+                if (noteMode) {
+                    setNotes(prev => {
+                        const next = prev.map(row => row.map(cell => [...cell]));
+                        const idx = next[r][c].indexOf(n);
+                        if (idx > -1) next[r][c].splice(idx, 1);
+                        else next[r][c].push(n);
+                        return next;
+                    });
+                } else {
+                    setBoard(prev => {
+                        const next = prev.map(row => [...row]);
+                        next[r][c] = n;
+                        return next;
+                    });
+                    setNotes(prev => {
+                        const next = prev.map(row => row.map(cell => [...cell]));
+                        next[r][c] = [];
+                        return next;
+                    });
+                    // 立即检查是否填对
+                    if (n !== solution[r][c]) {
+                        setErrors(prev => [...new Set([...prev, `${r}-${c}`])]);
+                    } else {
+                        setErrors(prev => prev.filter(e => e !== `${r}-${c}`));
+                    }
+                }
             };
 
-            // 获取单元格边框样式
+            // 获取单元格样式
+            const getCellClass = (r, c, cell, isFixed) => {
+                const isSelected = selected && selected[0] === r && selected[1] === c;
+                const selectedValue = selected ? board[selected[0]][selected[1]] : null;
+                const isSameNumber = selectedValue && selectedValue !== 0 && cell === selectedValue;
+                const isRowHighlight = selected && selected[0] === r && selectedValue === 0;
+                const isColHighlight = selected && selected[1] === c && selectedValue === 0;
+                const isError = errors.includes(`${r}-${c}`);
+
+                let className = 'sudoku-cell';
+                if (isFixed) className += ' fixed-cell';
+                if (isSelected) className += ' selected';
+                else {
+                    if (isSameNumber) className += ' same-number';
+                    if (isRowHighlight) className += ' row-highlight';
+                    if (isColHighlight) className += ' col-highlight';
+                }
+                if (isError) className += ' error';
+
+                return className;
+            };
+
             const getCellStyle = (r, c) => {
                 let style = {};
-                // 右边框 - 第2、5列后加粗
-                if ((c + 1) % 3 === 0 && c !== 8) {
-                    style.borderRight = '3px solid #1e40af';
-                }
-                // 下边框 - 第2、5行后加粗
-                if ((r + 1) % 3 === 0 && r !== 8) {
-                    style.borderBottom = '3px solid #1e40af';
-                }
+                if ((c + 1) % 3 === 0 && c !== 8) style.borderRight = '3px solid #1e40af';
+                if ((r + 1) % 3 === 0 && r !== 8) style.borderBottom = '3px solid #1e40af';
                 return style;
             };
 
@@ -449,52 +526,68 @@
                 );
             }
 
-            const selectedValue = selected ? board[selected[0]][selected[1]] : null;
+            // 数字按钮面板
+            const NumberPanel = () => (
+                <div className={`sudoku-controls flex ${isLandscape ? 'flex-col gap-2' : 'flex-wrap justify-center gap-3'}`}>
+                    <button onClick={() => setNoteMode(!noteMode)} className={`${isLandscape ? 'w-16 h-12 text-sm' : 'w-20 h-12 text-base'} rounded-xl font-bold transition-colors ${noteMode ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>标记</button>
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => (
+                        <button key={n} onClick={() => handleNumberInput(n)} className={`${isLandscape ? 'w-16 h-16 text-2xl' : 'w-14 h-14 text-xl'} bg-blue-100 hover:bg-blue-200 text-blue-800 font-bold rounded-xl transition-colors`}>{n}</button>
+                    ))}
+                    <button onClick={() => selected && !fixed[selected[0]][selected[1]] && setBoard(prev => { const next = prev.map(row => [...row]); next[selected[0]][selected[1]] = 0; return next; })} className={`${isLandscape ? 'w-16 h-16 text-sm' : 'w-14 h-14 text-base'} bg-red-100 hover:bg-red-200 text-red-800 font-bold rounded-xl transition-colors`}>清除</button>
+                    <button onClick={reset} className={`${isLandscape ? 'w-16 h-12 text-sm' : 'w-20 h-12 text-base'} bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl`}>重来</button>
+                </div>
+            );
 
             return (
-                <div className="min-h-screen flex flex-col items-center justify-center p-8">
+                <div className={`min-h-screen flex flex-col items-center justify-center p-4 ${isLandscape ? 'sudoku-landscape' : ''}`}>
                     <button onClick={reset} className="back-btn text-2xl font-bold text-gray-600 hover:text-gray-800 transition-colors bg-white/80 px-4 py-2 rounded-xl shadow">← 返回</button>
-                    <div className="flex items-center gap-6 mb-4 mt-16">
-                        <h1 className="text-6xl font-bold text-blue-600">数独</h1>
-                        <div className="bg-blue-100 rounded-xl px-4 py-2 text-center">
-                            <div className="text-xs text-blue-600 font-bold">难度</div>
-                            <div className="text-lg font-bold text-blue-800">{DIFFICULTY_SETTINGS[difficulty].name}</div>
+
+                    <div className={`flex ${isLandscape ? 'flex-row items-center gap-8' : 'flex-col items-center'}`}>
+                        {/* 左侧：游戏板和标题 */}
+                        <div className="flex flex-col items-center">
+                            <div className="flex items-center gap-4 mb-2 mt-16">
+                                <h1 className="text-5xl font-bold text-blue-600">数独</h1>
+                                <div className="bg-blue-100 rounded-xl px-3 py-2 text-center">
+                                    <div className="text-xs text-blue-600 font-bold">难度</div>
+                                    <div className="text-sm font-bold text-blue-800">{DIFFICULTY_SETTINGS[difficulty].name}</div>
+                                </div>
+                                <div className="bg-blue-100 rounded-xl px-4 py-2 text-center">
+                                    <div className="text-xs text-blue-600 font-bold">时间</div>
+                                    <div className="text-xl font-bold text-blue-800">{formatTime(timer)}</div>
+                                </div>
+                            </div>
+
+                            <div className="bg-white rounded-2xl p-3 shadow-xl">
+                                <div className="sudoku-grid">
+                                    {board.map((row, r) => row.map((cell, c) => {
+                                        const isFixed = fixed[r][c];
+                                        return (
+                                            <div
+                                                key={`${r}-${c}`}
+                                                onClick={() => handleCellClick(r, c)}
+                                                className={getCellClass(r, c, cell, isFixed)}
+                                                style={getCellStyle(r, c)}
+                                            >
+                                                {cell !== 0 ? cell : notes[r][c].length > 0 ? <div className="note-grid">{[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => <div key={n}>{notes[r][c].includes(n) ? n : ''}</div>)}</div> : ''}
+                                            </div>
+                                        );
+                                    }))}
+                                </div>
+                            </div>
                         </div>
-                        <div className="bg-blue-100 rounded-xl px-6 py-3 text-center"><div className="text-sm text-blue-600 font-bold">时间</div><div className="text-3xl font-bold text-blue-800">{formatTime(timer)}</div></div>
-                    </div>
-                    <div className="bg-white rounded-2xl p-4 shadow-xl">
-                        <div className="grid grid-cols-9" style={{ border: '3px solid #1e40af' }}>
-                            {board.map((row, r) => row.map((cell, c) => {
-                                const isSelected = selected && selected[0] === r && selected[1] === c;
-                                const isSameNumber = selectedValue !== 0 && cell === selectedValue;
-                                const isFixed = fixed[r][c];
-                                return (
-                                    <div
-                                        key={`${r}-${c}`}
-                                        onClick={() => handleCellClick(r, c)}
-                                        className={`sudoku-cell ${isFixed ? 'fixed-cell' : ''} ${isSelected ? 'selected' : ''} ${isSameNumber && !isSelected ? 'same-number' : ''}`}
-                                        style={getCellStyle(r, c)}
-                                    >
-                                        {cell !== 0 ? cell : notes[r][c].length > 0 ? <div className="note-grid">{[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => <div key={n}>{notes[r][c].includes(n) ? n : ''}</div>)}</div> : ''}
-                                    </div>
-                                );
-                            }))}
+
+                        {/* 右侧或底部：数字面板 */}
+                        <div className={`${isLandscape ? '' : 'mt-4'}`}>
+                            <NumberPanel />
                         </div>
                     </div>
-                    <div className="flex items-center gap-4 mt-6">
-                        <button onClick={() => setNoteMode(!noteMode)} className={`px-6 py-3 rounded-xl font-bold transition-colors ${noteMode ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>标记模式 {noteMode ? 'ON' : 'OFF'}</button>
-                        <button onClick={reset} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl">重新开始</button>
-                    </div>
-                    <div className="grid grid-cols-5 gap-3 mt-6">
-                        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => <button key={n} onClick={() => handleNumberInput(n)} className="w-16 h-16 bg-blue-100 hover:bg-blue-200 text-blue-800 text-2xl font-bold rounded-xl transition-colors">{n}</button>)}
-                        <button onClick={() => selected && !fixed[selected[0]][selected[1]] && setBoard(prev => { const next = prev.map(row => [...row]); next[selected[0]][selected[1]] = 0; return next; })} className="w-16 h-16 bg-red-100 hover:bg-red-200 text-red-800 text-xl font-bold rounded-xl transition-colors">清除</button>
-                    </div>
+
                     {completed && <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"><div className="bg-white rounded-3xl p-10 text-center"><div className="text-5xl font-bold mb-4 text-blue-600">🎉 恭喜完成!</div><div className="text-2xl text-gray-600 mb-6">用时: {formatTime(timer)}</div><button onClick={reset} className="bg-blue-600 hover:bg-blue-700 text-white text-xl font-bold py-3 px-8 rounded-xl">再玩一局</button></div></div>}
                 </div>
             );
         };
 
-        // ==================== 24点游戏 (简易模式 - 只加减法) ====================
+        // ==================== 24点游戏 ====================
         const Game24Point = ({ onBack, onUpdateStats }) => {
             const generateNumbers = () => {
                 while (true) {
@@ -579,7 +672,7 @@
                         <h1 className="text-6xl font-bold text-green-600">24点</h1>
                         <div className="bg-green-100 rounded-xl px-6 py-3 text-center"><div className="text-sm text-green-600 font-bold">已完成</div><div className="text-3xl font-bold text-green-800">{completed}</div></div>
                     </div>
-                    <p className="text-gray-600 mb-6 text-xl">使用 + 和 - 让四个数字等于 24 (简易模式)</p>
+                    <p className="text-gray-600 mb-6 text-xl">使用 + 和 - 让四个数字等于 24</p>
                     <div className="flex gap-6 mb-6">
                         {numbers.map((n, i) => <button key={i} onClick={() => handleNumberClick(n, i)} disabled={usedIndices.includes(i)} className={`w-24 h-24 text-4xl font-bold rounded-2xl transition-all ${usedIndices.includes(i) ? 'bg-gray-200 text-gray-400' : 'bg-green-100 hover:bg-green-200 text-green-800 shadow-lg'}`}>{n}</button>)}
                     </div>
