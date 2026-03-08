@@ -273,17 +273,36 @@
                 touchStart.current = null;
             };
 
+            // 全局触摸事件
+            useEffect(() => {
+                const handleGlobalTouchStart = (e) => { touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }; };
+                const handleGlobalTouchEnd = (e) => {
+                    if (!touchStart.current) return;
+                    const dx = e.changedTouches[0].clientX - touchStart.current.x;
+                    const dy = e.changedTouches[0].clientY - touchStart.current.y;
+                    if (Math.abs(dx) > Math.abs(dy)) { if (Math.abs(dx) > 30) move(dx > 0 ? 'right' : 'left'); }
+                    else { if (Math.abs(dy) > 30) move(dy > 0 ? 'down' : 'up'); }
+                    touchStart.current = null;
+                };
+                document.addEventListener('touchstart', handleGlobalTouchStart, { passive: false });
+                document.addEventListener('touchend', handleGlobalTouchEnd, { passive: false });
+                return () => {
+                    document.removeEventListener('touchstart', handleGlobalTouchStart);
+                    document.removeEventListener('touchend', handleGlobalTouchEnd);
+                };
+            }, [move]);
+
             const boardSize = GRID_SIZE_2048 * TILE_SIZE + (GRID_SIZE_2048 + 1) * GAP;
 
             return (
-                <div className="min-h-screen flex flex-col items-center justify-center p-8">
+                <div className="min-h-screen flex flex-col items-center justify-center p-8" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
                     <button onClick={onBack} className="back-btn text-2xl font-bold text-gray-600 hover:text-gray-800 transition-colors bg-white/80 px-4 py-2 rounded-xl shadow">← 返回</button>
                     <h1 className="text-6xl font-bold text-orange-600 mb-6">2048</h1>
                     <div className="flex gap-8 mb-6">
                         <div className="bg-orange-100 rounded-xl px-6 py-3 text-center"><div className="text-sm text-orange-600 font-bold">得分</div><div className="text-3xl font-bold text-orange-800">{score}</div></div>
                         <div className="bg-orange-100 rounded-xl px-6 py-3 text-center"><div className="text-sm text-orange-600 font-bold">最高分</div><div className="text-3xl font-bold text-orange-800">{bestScore}</div></div>
                     </div>
-                    <div className="game-board-2048 bg-[#bbada0] rounded-xl p-3 mb-6" style={{ width: boardSize, height: boardSize }} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+                    <div className="game-board-2048 bg-[#bbada0] rounded-xl p-3 mb-6" style={{ width: boardSize, height: boardSize }}>
                         {board.map((row, r) => row.map((cell, c) => (
                             <div key={`${r}-${c}`} style={{ position: 'absolute', width: TILE_SIZE, height: TILE_SIZE, left: GAP + c * (TILE_SIZE + GAP), top: GAP + r * (TILE_SIZE + GAP), backgroundColor: cell ? getTileColor(cell).bg : 'rgba(238, 228, 218, 0.35)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: cell > 512 ? 40 : 50, fontWeight: 'bold', color: getTileColor(cell).text, transition: 'all 0.15s ease' }} className={cell ? 'tile-new' : ''}>{cell || ''}</div>
                         )))}
